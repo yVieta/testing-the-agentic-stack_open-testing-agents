@@ -1,7 +1,5 @@
-# pairates-test-agentes aka the dhallcrew
+# open-testing-agents-paiselfhost
 
-A rewrite of `testcrew`: the crew and agent configurations are authored in
-**Dhall** (instead of JSON/JSONC), and the resulting crew runs across
 **three Raspberry Pis running NixOS**, coordinated over **MQTT**. The target
 is a local web server reachable from all three Pis.
 
