@@ -155,7 +155,7 @@ class Worker:
         """Run this PI's crew and return its output."""
         if not (self.cwd / "crew.json").exists():
             raise RuntimeError(
-                f"crew.json not found in {self.cwd} - run compile.sh or copy a "
+                f"crew.json not found in {self.cwd} - run make or copy a "
                 "build/piN-* directory here"
             )
         inputs = {"target_url": self.cfg.get("target_url", "")}

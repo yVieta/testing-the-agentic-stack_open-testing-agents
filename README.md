@@ -7,7 +7,7 @@ is a local web server reachable from all three Pis.
 
 ```
                  ┌─────────────────────────┐
-                 │   local web server     │  (the app under test, on the LAN)
+                 │   local web server      │  (the app under test, on the LAN)
                  └────────────┬────────────┘
                               │ http (10.0.0.20)
         ┌─────────────┬───────┴────────┬─────────────┐
@@ -54,13 +54,13 @@ nix/
   hosts/*.nix            per-host configuration
   gen-credentials.sh     one-time secret generation (passwords, TLS certs)
   secrets.env.example    template for worker secret files
-compile.sh               local compile of .dhall -> build/<role>/ (dev preview)
+Makefile                 make build plan from .dhall/ (Manifest.dhall + Pyproject.dhall) -> build/<role>/
 build/                   generated per-PI crews (gitignored)
 ```
 
 ## Requirements
 
-- Dhall tooling for local dev (`./compile.sh`): `dhall-to-json`
+- Dhall tooling plus `make` and `jq` for local dev (`make`): `dhall-to-json`
 - Three Raspberry Pis + one broker host, all running **NixOS**
   (aarch64-linux; Raspberry Pi OS optional for quick local experiments)
 - A local web server to test, reachable from every Pi
@@ -68,7 +68,7 @@ build/                   generated per-PI crews (gitignored)
 ## Quick local experiment (no NixOS yet)
 
 ```sh
-./compile.sh                     # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
+make                               # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
 pip install -e .                 # crewai[tools] + paho-mqtt
 # edit build/<role>/.env         (broker + target + agent role)
 cd build/pi1-e2e && python3 ../../worker/worker.py --verbose
@@ -142,7 +142,7 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
 
 ## Editing configuration
 
-- Agents/crews/tasks: edit `.dhall/*`, then either re-run `./compile.sh` for
+- Agents/crews/tasks: edit `.dhall/*`, then either re-run `make` for
   local previews or rebuild via NixOS (the worker module compiles Dhall →
   JSON itself during `nixos-rebuild`, so `build/` is just a preview).
 - Dhall is type-safe: typos, wrong fields, invalid process values fail at
@@ -171,5 +171,5 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
   `worker.py` `_run_crew` output in the journal.
 - TLS handshake errors → CA mismatch; re-sync `ca.crt` from the broker.
 - `dhall-json` not in your nixpkgs → override `crewWorker.crewConfigs`
-  (see module) or compile first with `./compile.sh` and point it at the
+  (see module) or compile first with `make` and point it at the
   `build/` outputs.

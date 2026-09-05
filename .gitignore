@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-# Compiled configuration output (regenerate with ./compile.sh)
+# Compiled configuration output (regenerate with make)
 build/
 
 # Secrets created by nix/gen-credentials.sh (never commit these)
