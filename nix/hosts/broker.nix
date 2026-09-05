@@ -12,6 +12,6 @@
   mqttBroker.enable = true;
 
   networking.firewall.allowPing = true;
-
-  system.stateVersion = "24.11";
+  # using flake 
+  # system.stateVersion = "24.11";
 }

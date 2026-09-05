@@ -38,5 +38,5 @@
   # Deactivate annoying swap chatter on SD cards.
   zramSwap.enable = false;
 
-  system.stateVersion = "24.11";
+  system.stateVersion = "26.11";
 }

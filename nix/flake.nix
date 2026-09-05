@@ -11,7 +11,7 @@
   description = "dhallcrew: MQTT-coordinated testing crew on 3 Raspberry Pis (NixOS)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; # let it rolling 
     # Optional: add nixos-hardware for tuned Raspberry Pi defaults:
     #   nixos-hardware.url = "github:NixOS/nixos-hardware";
   };

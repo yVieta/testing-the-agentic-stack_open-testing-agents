@@ -102,6 +102,14 @@ in
       type = types.str;
       description = "MQTT broker host (IP or name on the LAN).";
     };
+    extraEnvironment = mkOption {
+      type = types.attrsOf types.str;
+      default = { };
+      description = ''
+        Extra environment variables for the worker service (e.g. per-role
+        tooling paths like PLAYWRIGHT_BROWSERS_PATH on the e2e host).
+      '';
+    };
     brokerPort = mkOption {
       type = types.int;
       default = 8883;
@@ -153,14 +161,16 @@ in
 
       # Non-secret defaults (secrets come from cfg.envFile and win by order
       # of EnvironmentFile after Environment=).
-      environment = {
-        BROKER_HOST = cfg.brokerHost;
-        BROKER_PORT = builtins.toString cfg.brokerPort;
-        BROKER_TLS_CA = cfg.tlsCa;
-        BROKER_TLS_REQUIRE_CERT = if cfg.tlsRequireCert then "true" else "false";
-        TARGET_URL = cfg.targetUrl;
-        MQTT_TOPIC_PREFIX = "crew";
-      };
+      environment =
+        {
+          BROKER_HOST = cfg.brokerHost;
+          BROKER_PORT = builtins.toString cfg.brokerPort;
+          BROKER_TLS_CA = cfg.tlsCa;
+          BROKER_TLS_REQUIRE_CERT = if cfg.tlsRequireCert then "true" else "false";
+          TARGET_URL = cfg.targetUrl;
+          MQTT_TOPIC_PREFIX = "crew";
+        }
+        // cfg.extraEnvironment;
 
       serviceConfig = {
         Type = "simple";
