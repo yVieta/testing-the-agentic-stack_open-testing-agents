@@ -32,6 +32,4 @@
         broker = mkHost "broker";
       };
   };
-
-  system.stateVersion = "26.11";
 }
