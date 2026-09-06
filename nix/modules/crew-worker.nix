@@ -94,8 +94,9 @@ in
       default = "/etc/dhallcrew/${cfg.role}.env";
       description = ''
         Secrets file (BROKER_USERNAME/BROKER_PASSWORD, ...) read by the
-        worker. Create it with nix/gen-credentials.sh. Values here override
-        the non-secret defaults set by this module.
+        worker. Create it manually under /etc/dhallcrew/<role>.env (see
+        nix/secrets.env.example). Values here override the non-secret
+        defaults set by this module.
       '';
     };
     brokerHost = mkOption {

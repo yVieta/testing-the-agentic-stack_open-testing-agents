@@ -18,14 +18,14 @@
     mosquitto           # mosquitto_sub to watch status/final topics
     glow                # render the final markdown report in a terminal
     bat                 # pretty-print JSON/logs alongside glow
-    taskwarrior         # track outstanding work/findings as structured tasks
+    taskwarrior2        # track outstanding work/findings as structured tasks
     timewarrior         # time-tracking to see how long phases take per run
     gnuplot             # generate simple charts from per-run metrics
   ];
 
   # Useful shell aliases for the operator (root/admin) to inspect a run.
-  # Requires the monitor password from nix/gen-credentials.sh in
-  # /etc/dhallcrew/monitor.env (export MQTT_MONITOR_PASS first).
+  # Requires the monitor password in /etc/dhallcrew/monitor.env
+  # (export MQTT_MONITOR_PASS first).
   environment.shellAliases = {
     crew-status = "mosquitto_sub -h ${config.crewWorker.brokerHost} -p 8883 --cafile /etc/dhallcrew/certs/ca.crt -u monitor -P $MQTT_MONITOR_PASS -t 'crew/status/#' -v";
     crew-final = "mosquitto_sub -h ${config.crewWorker.brokerHost} -p 8883 --cafile /etc/dhallcrew/certs/ca.crt -u monitor -P $MQTT_MONITOR_PASS -t 'crew/final' -v";

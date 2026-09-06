@@ -12,5 +12,9 @@ wheels/
 # Compiled configuration output (regenerate with make)
 build/
 
-# Secrets created by nix/gen-credentials.sh (never commit these)
+# Secrets created manually under /etc/dhallcrew/ (never commit these)
 secrets/
+
+# WiFi SSID + WPA2 PSK, read by the flake at image-build time (never commit).
+# Copy nix/network-secrets.example.nix to create it.
+nix/network-secrets.nix

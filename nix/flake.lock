@@ -1,0 +1,41 @@
+{
+  "nodes": {
+    "network-secrets": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788733527,
+        "narHash": "sha256-fYBahdIqs+ZWANSeQ7gYeg5A7Vp9AvjwIfA47V5U7mY=",
+        "path": "/home/vieta/Projects/agents/crews/dhallcrew/nix/network-secrets.nix",
+        "type": "path"
+      },
+      "original": {
+        "path": "/home/vieta/Projects/agents/crews/dhallcrew/nix/network-secrets.nix",
+        "type": "path"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1788614874,
+        "narHash": "sha256-7QYjT2vHLuX9Z1pdxHXDKCbh1CR3D/2rywB9Tx0MPRg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c043004d1c6985732bcc1cbc5a9c9aecbbb4e0f0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "network-secrets": "network-secrets",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

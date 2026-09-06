@@ -1,19 +1,18 @@
-# Makefile -- compile the Dhall crew configs into per-PI JSON for crewAI.
+# Two build jobs live here: the Dhall -> JSON crew configs (the workers that
+# run on the Pis) and the NixOS SD-card images for those same Pis.
+#
+#   make                       compile Dhall crews      -> build/<role>/
+#   make images                build all four aarch64 SD images (U-Boot + systemd-boot)
+#   make pi1-e2e-sd-image      build one image
+#   make check                 nix flake check (lint the NixOS flake, no build)
+#   make clean                 remove build/ + nix/result
+
+# --- Dhall -> JSON crews ----------------------------------------------------
 #
 # The build plan lives in Dhall, like the configs themselves:
 #   .dhall/Manifest.dhall   which crews exist, and their agent/crew sources
 #   .dhall/Pyproject.dhall  renders each crew's pyproject.toml
-# `make` (or `make all`) drives that plan and replaces the old compile.sh.
-#
-# Layout produced:
-#   build/pi1-e2e/       crew.json + agents/e2e_test_agent.json
-#   build/pi2-pentester/ crew.json + agents/pentester_agent.json
-#   build/pi3-manager/   crew.json + agents/test_manager_agent.json
-#
-# Each build/piN-* directory is self-contained so it can be rsync'd to a
-# Raspberry Pi and run with `crewai run` for quick experiments. For the
-# real deployment, NixOS rebuilds the same Dhall sources (see
-# nix/modules/crew-worker.nix).
+# Produces build/pi1-e2e/, build/pi2-pentester/, build/pi3-manager/.
 
 DHALL    = .dhall
 MANIFEST = build/.manifest.json
@@ -43,5 +42,28 @@ crews: $(MANIFEST)
 	done
 	@printf 'Compiled Dhall -> JSON for %d Raspberry Pi crews under build/\n' "$$(jq 'length' "$<")"
 
-clean:
+# --- NixOS SD-card images ---------------------------------------------------
+
+FLAKE  := nix
+HOSTS  := pi1-e2e pi2-pentester pi3-manager broker
+
+.PHONY: check images daemonize $(HOSTS)
+
+check:
+	nix flake check $(FLAKE)
+
+images: $(addsuffix -sd-image,$(HOSTS))
+
+%-sd-image:
+	nix build -L ./$(FLAKE)#$@
+	@echo "image ready: $(FLAKE)/result/sd-image/"
+
+daemonize:
+	@nix daemon >/dev/null 2>&1 & echo "nix daemon started"
+
+clean: clean-crews
+	rm -rf $(FLAKE)/result
+
+.PHONY: clean-crews
+clean-crews:
 	rm -rf build

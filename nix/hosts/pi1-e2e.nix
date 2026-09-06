@@ -21,6 +21,7 @@
 
   # Browsers + drivers the e2e agent uses to drive the target UI.
   environment.systemPackages = with pkgs; [
+    chromium            # only needed for playwright extras
     playwright          # official browser-automation CLI (test runner)
     playwright-driver   # driver binaries; .browsers provides the webkit/chromium builds
     nodejs              # runtime for playwright tests
