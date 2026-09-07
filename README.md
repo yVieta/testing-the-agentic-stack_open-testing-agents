@@ -5,7 +5,7 @@ is a local web server reachable from all three Pis.
 
 ```
                  ┌─────────────────────────┐
-                 │   local web server      │  (the app under test, on the LAN)
+                 │   local web server      │  (system under test , on the LAN)
                  └────────────┬────────────┘
                               │ http (10.0.0.20)
         ┌─────────────┬───────┴────────┬─────────────┐
