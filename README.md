@@ -69,7 +69,7 @@ build/                   generated per-PI crews (gitignored)
 ## Quick local experiment (no NixOS yet)
 
 ```sh
-make                               # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
+make                             # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
 pip install -e .                 # crewai[tools] + paho-mqtt
 # edit build/<role>/.env         (broker + target + agent role)
 cd build/pi1-e2e && python3 ../../worker/worker.py --verbose
@@ -107,9 +107,9 @@ not configured.
 Secrets live in plain files under `/etc/dhallcrew/` - never in the Nix store.
 Create them manually on the broker:
 
-- `mosquitto_passwd -b <tmp> <user> <password> && cut -d: -f2 <tmp>` → one
+- `mosquitto_passwd -b <tmp> <user> <password> && cut -d: -f2 <tmp>` -> one
   hash per file in `/etc/dhallcrew/passwd/<user>` (see `mqtt-broker.nix`).
-- `openssl req -x509 ...` → private CA `ca.crt` + broker `server.key`/
+- `openssl req -x509 ...` -> private CA `ca.crt` + broker `server.key`/
   `server.crt` with `subjectAltName` for the broker host in `/etc/dhallcrew/certs/`.
 - a `<role>.env` per worker with `BROKER_USERNAME` / `BROKER_PASSWORD`.
 
@@ -213,8 +213,8 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
 - SSH is key-only on every host (`PasswordAuthentication = false`).
 - The crew target must be firewalled so scanning agents only reach the
   designated server/VLAN.
-- Secrets never enter the Nix store (wifi → `network-secrets.nix`, broker TLS
-  & MQTT credentials → `/etc/dhallcrew/*`); consider sops-nix/age for more
+- Secrets never enter the Nix store (wifi -> `network-secrets.nix`, broker TLS
+  & MQTT credentials -> `/etc/dhallcrew/*`); consider sops-nix/age for more
   hosts.
 
 ## Troubleshooting
@@ -228,3 +228,7 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
 - `dhall-json` not in your nixpkgs → override `crewWorker.crewConfigs`
   (see module) or compile first with `make` and point it at the
   `build/` outputs.
+
+## Further Notes 
+- In the resource folders are our sources listed that we used
+
