@@ -1,0 +1,18 @@
+[Unit]
+Description=Grafana dashboard (systemd-managed container)
+After=sut-pod.service
+Requires=sut-pod.service
+
+[Container]
+Image=${grafana_image}
+Pull=newer
+Pod=sut.pod
+Environment=GF_SECURITY_ADMIN_USER=${grafana_admin_user}
+Environment=GF_SECURITY_ADMIN_PASSWORD=${grafana_admin_password}
+Environment=GF_USERS_ALLOW_SIGN_UP=false
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=sut-pod.service

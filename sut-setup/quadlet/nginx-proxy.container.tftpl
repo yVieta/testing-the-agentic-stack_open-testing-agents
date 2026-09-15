@@ -1,0 +1,18 @@
+[Unit]
+Description=nginx reverse proxy for the SUT services
+After=sut-pod.service
+Requires=sut-pod.service
+
+[Container]
+Image=${nginx_image}
+Pull=newer
+Pod=sut.pod
+Volume=${nginx_config_dir}/default.conf:/etc/nginx/conf.d/default.conf:ro
+HealthCmd=/bin/sh -c "wget -q -O /dev/null http://127.0.0.1/ || exit 1"
+HealthInterval=10s
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=sut-pod.service

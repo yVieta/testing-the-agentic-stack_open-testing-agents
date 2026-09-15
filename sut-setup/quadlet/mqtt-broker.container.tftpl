@@ -1,0 +1,19 @@
+[Unit]
+Description=EMQX MQTT broker (systemd-managed container)
+After=sut-pod.service
+Requires=sut-pod.service
+
+[Container]
+Image=${mqtt_broker_image}
+Pull=newer
+Pod=sut.pod
+Environment=EMQX_NAME=emqx
+Environment=EMQX_HOST=127.0.0.1
+HealthCmd=/opt/emqx/bin/emqx_ctl status
+HealthInterval=30s
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=sut-pod.service
