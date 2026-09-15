@@ -2,20 +2,26 @@
 
 **three Raspberry Pis running NixOS**, coordinated over **MQTT**. The target
 is a local web server reachable from all three Pis.
-
+Base Discription 
 ```
                  ┌─────────────────────────┐
                  │   local web server      │  (system under test , on the LAN)
                  └────────────┬────────────┘
                               │ http (10.0.0.20)
-        ┌─────────────┬───────┴────────┬─────────────┐
-        ▼             ▼                 ▼
-  ┌───────────┐ ┌───────────┐  ┌──────────────┐  ┌─────────────┐
-  │ PI 1      │ │ PI 2      │  │ PI 3         │  │ PI 4        │
-  │ e2e test  │ │ pentester │  │ test manager │  │ MQTT broker │
-  │ engineer  │ │           │  │              │  │ (mosquitto) │
-  └───────────┘ └───────────┘  └──────────────┘  └─────────────┘
-        └─────────────── MQTT (TLS 8883) ────────────┘
+        ┌─────────────┬───────┴────────┬─────────────┐  
+        ▼             ▼                ▼             ▼     
+  ┌───────────┐ ┌───────────┐  ┌──────────────┐  ┌────────────────┐
+  │ PI 1      │ │ PI 2      │  │ PI 3         │  │ AMD64 Server   │
+  │   test    │ │pentester  │  │ test manager │  │ MQTT broker    │
+  │ engineer  │ │           │  │              │  │ (mosquitto)    │
+  └───────────┘ └───────────┘  └──────────────┘  └────────────────┘
+        └─────────MQTT (TLS 8883)──┬────────────────────────┘
+                              ┌──────────────┐ 
+                              │AMD64 Server  │ 
+                              │              │ 
+                              │ GPU, Model,  │ 
+                              │ Database     │  
+                              └──────────────┘ 
 ```
 
 Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
@@ -134,7 +140,7 @@ git add -A && git commit -m "flaky: initial crew config"   # once
 nixos-rebuild switch --flake .#pi1-e2e       # on PI 1
 nixos-rebuild switch --flake .#pi2-pentester # on PI 2
 nixos-rebuild switch --flake .#pi3-manager   # on PI 3
-nixos-rebuild switch --flake .#broker        # on the broker
+nixos-rebuild switch --flake .#broker        # on the broker, which will not me a respberry pi anymore 
 ```
 
 or from a control machine over SSH:
@@ -143,7 +149,7 @@ or from a control machine over SSH:
 nixos-rebuild switch --flake .#pi1-e2e --target-host root@10.0.0.11 --build-host localhost
 ```
 
-### 3b. Build a full SD card image instead
+### 3b. Nixos on Raspberry PI: Build a full SD card image instead
 
 Each host also ships a flashable Raspberry Pi SD image built from the same
 host module (boot chain: video-core firmware -> U-Boot -> **systemd-boot**,
@@ -231,4 +237,11 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
 
 ## Further Notes 
 - In the resource folders are our sources listed that we used
+
+## Disclaimer
+- This project ist mostly written without using anikind of Generative AI 
+- Only Open Models which are selfhosted are used in this project
+
+## Contributions
+- Contributions are welcomed but restrictive using generative AI. There must be atleast a human behind the requests who needs to explain why they made the chage.
 
