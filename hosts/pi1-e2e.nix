@@ -1,7 +1,7 @@
 # PI 1 - the e2e test engineer (playwright).
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./common.nix ../modules/crew-worker.nix ];
+  imports = [ ./arch-pi64.nix ../modules/crew-worker.nix ];
 
   networking.hostName = "pi1-e2e";
 
@@ -11,9 +11,7 @@
   crewWorker.brokerHost = "10.0.0.10";
   crewWorker.targetUrl = "http://10.0.0.20";
 
-  # Pin the pip playwright to the same version nixpkgs ships its browsers
-  # for, so python playwright finds the browser binaries on first run.
-  crewWorker.crewaiDeps = [
+ crewWorker.crewaiDeps = [
     "crewai[tools]>=1.15.20,<2.0.0"
     "paho-mqtt>=2.0,<3.0"
     "playwright==${pkgs.playwright.version}"

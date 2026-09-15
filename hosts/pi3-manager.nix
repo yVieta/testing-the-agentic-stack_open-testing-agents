@@ -1,7 +1,7 @@
 # PI 3 - the test manager (reviews results, writes the final report).
 { config, lib, pkgs, ... }:
 {
-  imports = [ ./common.nix ../modules/crew-worker.nix ];
+  imports = [ ./arch-pi64.nix ../modules/crew-worker.nix ];
 
   networking.hostName = "pi3-manager";
 

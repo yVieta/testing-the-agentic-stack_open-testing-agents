@@ -1,20 +1,11 @@
-# Python-generated files
-__pycache__/
+__pycache__/  
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv
-
-# Compiled configuration output (regenerate with make)
 build/
-
-# Secrets created manually under /etc/dhallcrew/ (never commit these)
 secrets/
-
-# WiFi SSID + WPA2 PSK, read by the flake at image-build time (never commit).
-# Copy nix/network-secrets.example.nix to create it.
-nix/network-secrets.nix
+# do not show wifi password nor share your SSID
+network-secrets.nix

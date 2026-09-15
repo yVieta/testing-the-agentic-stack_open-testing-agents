@@ -1,13 +1,13 @@
-# The MQTT broker host (a 4th Pi, or any low-power LAN machine).
+# The MQTT broker host 
 #
 # Exposes:
 #   - 8883  TLS   (used by the three workers)
 #   - 1883  plain (debugging only, drop in production)
 { config, lib, ... }:
 {
-  imports = [ ./common.nix ../modules/mqtt-broker.nix ];
+  imports = [ ./arch-amd64.nix ../modules/mqtt-broker.nix ];
 
-  networking.hostName = "pi4-broker";
+  networking.hostName = "broker";
 
   mqttBroker.enable = true;
 
