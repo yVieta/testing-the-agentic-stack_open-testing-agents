@@ -3,13 +3,13 @@
     "network-secrets": {
       "flake": false,
       "locked": {
-        "lastModified": 1788733527,
-        "narHash": "sha256-fYBahdIqs+ZWANSeQ7gYeg5A7Vp9AvjwIfA47V5U7mY=",
-        "path": "/home/vieta/Projects/agents/crews/dhallcrew/nix/network-secrets.nix",
+        "lastModified": 1,
+        "narHash": "sha256-iLwz/dTWA10buwvcjC4MNwDH3ohjCRtOL4wNu65bz60=",
+        "path": "/nix/store/ljqd5gz5p9y571z8bnd493scdk5f0dia-source/network-secrets.example.nix",
         "type": "path"
       },
       "original": {
-        "path": "/home/vieta/Projects/agents/crews/dhallcrew/nix/network-secrets.nix",
+        "path": "/nix/store/ljqd5gz5p9y571z8bnd493scdk5f0dia-source/network-secrets.example.nix",
         "type": "path"
       }
     },

@@ -45,35 +45,16 @@ results: e2e → pentester → test manager → final report, all over MQTT topi
 
 ## Repo layout
 
-```
-.dhall/                  Dhall source of truth (agents + per-PI crews)
-  Types.dhall            crewAI JSON schema as Dhall types
-  e2e_test_agent.dhall   pentester_agent.dhall   test_manager_agent.dhall
-  crews/pi{1,2,3}_*.dhall
-worker/worker.py         MQTT worker (one per Pi; subscribes, runs crewai, publishes)
-nix/
-  flake.nix              NixOS machines: 3 worker Pis + broker
-  modules/crew-worker.nix   NixOS module: worker service + Dhall->JSON build
-  modules/mqtt-broker.nix   NixOS module: mosquitto (TLS, ACL, firewall)
-  modules/network.nix       WiFi module (reads nix/network-secrets.nix)
-  modules/sd-image-systemd-boot.nix  SD image builder (U-Boot + systemd-boot)
-  hosts/*.nix            per-host configuration
-  network-secrets.nix    YOUR WiFi SSID + PSK (gitignored - copy the example)
-  network-secrets.example.nix  template for network-secrets.nix
-  secrets.env.example    template for worker secret files
-Makefile                 Dhall -> JSON crews (make) + NixOS images (make images)
-build/                   generated per-PI crews (gitignored)
-```
-
 ## Requirements
 
-- Dhall tooling plus `make` and `jq` for local dev (`make`): `dhall-to-json`
+- Nix: See at nixos.org or lix.systems
+  - All dependencies will behandled within the Nix/Lix package manager
 - Three Raspberry Pis + one broker host, all running **NixOS**
   (aarch64-linux; Raspberry Pi OS optional for quick local experiments)
 - A local web server to test, reachable from every Pi
 
-## Quick local experiment (no NixOS yet)
-
+## Quick local experiment 
+After running `nix develop`
 ```sh
 make                             # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
 pip install -e .                 # crewai[tools] + paho-mqtt

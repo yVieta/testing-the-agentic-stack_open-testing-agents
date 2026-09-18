@@ -21,7 +21,7 @@ let
   crewConfigs = pkgs.runCommand "dhallcrew-crew-configs"
     {
       nativeBuildInputs = [ pkgs.dhall-json ];
-      src = ../../.dhall;
+      src = ../.dhall;
     }
     ''
       cp -r "$src" dhall
@@ -44,7 +44,7 @@ let
         --output "$out/pi3-manager/crew.json"
     '';
 
-  workerPy = ../../worker/worker.py;
+  workerPy = ../worker/worker.py;
 
   # Runtime working directory; writable so previous_output.md / report.md and
   # the compiled crew.json can live there (StateDirectory below).
