@@ -216,6 +216,9 @@ cat /var/lib/dhallcrew/pi3-manager/report.md       # results (on PI 3)
   (see module) or compile first with `make` and point it at the
   `build/` outputs.
 
+## System Under Test Setup
+The System under test can be setted up via Terraform which deploys the juice-shop project from OWASP: https://owasp.org/projects/juice-shop
+
 ## Further Notes 
 - In the resource folders are our sources listed that we used
 
