@@ -19,6 +19,7 @@
     devShell = pkgs:
       pkgs.mkShell {
         packages = with pkgs; [
+          just
           python3
           python3Packages.pip
           dhall # .dhall/ sources
