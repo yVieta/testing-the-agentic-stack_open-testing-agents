@@ -5,11 +5,14 @@
 #   packages:             flashable / bootable image for first install
 #     aarch64-linux:      SD card image  (*-sd-image)    -- make images
 #     x86_64-linux:       installer ISO  (*-iso)         -- make iso
+#
+# Dependencies are pinned with npins, not flake.lock: the nixpkgs revision
+# lives in npins/sources.json. Bump it with `npins update` (or
+# `npins add github NixOS nixpkgs --branch nixos-unstable`).
 {
   description = "dhallcrew: MQTT-coordinated testing crew on 3 Raspberry Pis + amd64 broker (NixOS)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; # let it rolling
     # WiFi SSID + derived WPA2 PSK (64 hex) - see nix/network-secrets.example.nix.
     # The converted file nix/network-secrets.nix is gitignored, so it cannot be
     # part of a `git+file:` or relative `path:./...` flake source (those resolve
@@ -24,13 +27,12 @@
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      network-secrets,
-    }:
+    { self, network-secrets }:
     let
-      lib = nixpkgs.lib;
+      # nixpkgs is pinned by npins (npins/sources.json); `outPath` is the
+      # store path of the pinned source.
+      nixpkgs = (import ./npins { }).nixpkgs.outPath;
+      lib = import "${nixpkgs}/lib";
 
       # The crew's two architectures: Raspberry Pis are aarch64, the broker is
       # x86_64. Same modules, different boot media.
@@ -77,9 +79,31 @@
         crewNetwork.psk = secrets.psk or null;
       };
 
+      # Re-implementation of `lib.nixosSystem` from the nixpkgs flake, so the
+      # system works without nixpkgs being a flake input: eval-config.nix is
+      # called directly with the npins-pinned sources.
+      nixosSystem =
+        args:
+        import "${nixpkgs}/nixos/lib/eval-config.nix" (
+          {
+            lib = lib;
+            # system is set modularly through nixpkgs.system (see flake inputs).
+            system = null;
+            modules =
+              args.modules
+              ++ [
+                # Expose the pinned nixpkgs source so `nixpkgs.flake.source`
+                # (and thus the registry / NIX_PATH pinning in
+                # nixos/modules/misc/nixpkgs-flake.nix) works as with flakes.
+                ({ config, ... }: { config.nixpkgs.flake.source = nixpkgs; })
+              ];
+          }
+          // builtins.removeAttrs args [ "modules" ]
+        );
+
       mkHost =
         host:
-        nixpkgs.lib.nixosSystem {
+        nixosSystem {
           inherit (host) system;
           modules = baseModules ++ [
             ./hosts/${host.name}.nix
@@ -92,7 +116,7 @@
       #   x86_64  -> ISO     (installer/cd-dvd/iso-image.nix)
       mkImage =
         host:
-        nixpkgs.lib.nixosSystem {
+        nixosSystem {
           inherit (host) system;
           modules =
             baseModules
@@ -151,7 +175,7 @@
             pipenv
           ];
         };
-      pkgsFor = system: nixpkgs.legacyPackages.${system};
+      pkgsFor = system: import nixpkgs { inherit system; };
       systems = [
         aarch64
         x86_64

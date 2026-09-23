@@ -5,34 +5,17 @@
       "locked": {
         "lastModified": 1,
         "narHash": "sha256-iLwz/dTWA10buwvcjC4MNwDH3ohjCRtOL4wNu65bz60=",
-        "path": "/nix/store/ljqd5gz5p9y571z8bnd493scdk5f0dia-source/network-secrets.example.nix",
+        "path": "/nix/store/xxkhlsnhjsz2b5fg8a659b1yyz5bzh1h-source/network-secrets.example.nix",
         "type": "path"
       },
       "original": {
-        "path": "/nix/store/ljqd5gz5p9y571z8bnd493scdk5f0dia-source/network-secrets.example.nix",
+        "path": "/nix/store/xxkhlsnhjsz2b5fg8a659b1yyz5bzh1h-source/network-secrets.example.nix",
         "type": "path"
-      }
-    },
-    "nixpkgs": {
-      "locked": {
-        "lastModified": 1789286504,
-        "narHash": "sha256-eiEK7cKZORNEvX0GeF3RtNEF/JXhgf2RqSp3230q13E=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "ef34387ddd751e1ab8857adf4676492d32eb24ec",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
       }
     },
     "root": {
       "inputs": {
-        "network-secrets": "network-secrets",
-        "nixpkgs": "nixpkgs"
+        "network-secrets": "network-secrets"
       }
     }
   },
