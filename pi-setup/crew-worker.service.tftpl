@@ -1,0 +1,15 @@
+[Unit]
+Description=dhallcrew MQTT worker (${role})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${worker_dir}
+ExecStart=${venv_dir}/bin/python ${repo_dir}/worker/worker.py --dir ${worker_dir} --verbose
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=70
+
+[Install]
+WantedBy=default.target

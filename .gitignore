@@ -7,5 +7,3 @@ wheels/
 .venv
 build/
 secrets/
-# do not show wifi password nor share your SSID
-network-secrets.nix

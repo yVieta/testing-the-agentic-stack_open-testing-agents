@@ -1,9 +1,10 @@
 # iacSUT
 
 ## Usage
-```bash
-terraform init
-terraform apply
+```sh
+tofu init
+tofu plan
+tofu apply
 ```
 
 ### External access
@@ -16,18 +17,15 @@ localhost-only.
 
 ## Project layout
 
-```
-.
-├── main.tf        # local_file quadlets + null_resource install/start steps
-├── providers.tf   # local + null providers
-├── variables.tf   # tunables (images, ports, credentials)
-├── outputs.tf     # managed services and URLs
-└── quadlet/       # Quadlet templates (*.container.tftpl)
-```
+- `main.tf` — writes the Quadlet unit files and runs the install/start steps
+- `providers.tf` — local + null providers
+- `variables.tf` — tunables (images, ports, credentials)
+- `outputs.tf` — managed services and URLs
+- `quadlet/` — Quadlet templates (`*.container.tftpl`)
 
 ## Teardown
 
 ```bash
 systemctl --user stop <service-name>
-terraform destroy
+tofu destroy
 ```

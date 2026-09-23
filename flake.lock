@@ -1,21 +1,24 @@
 {
   "nodes": {
-    "network-secrets": {
-      "flake": false,
+    "nixpkgs": {
       "locked": {
-        "lastModified": 1,
-        "narHash": "sha256-iLwz/dTWA10buwvcjC4MNwDH3ohjCRtOL4wNu65bz60=",
-        "path": "/nix/store/xxkhlsnhjsz2b5fg8a659b1yyz5bzh1h-source/network-secrets.example.nix",
-        "type": "path"
+        "lastModified": 1790046670,
+        "narHash": "sha256-MYiI+CzL0tuWgRPjGsKCDHqYs2T3OzMlMQWOYWG0qso=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "6774f7bc253789b113a4f39285dc0fa100abeacc",
+        "type": "github"
       },
       "original": {
-        "path": "/nix/store/xxkhlsnhjsz2b5fg8a659b1yyz5bzh1h-source/network-secrets.example.nix",
-        "type": "path"
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
       }
     },
     "root": {
       "inputs": {
-        "network-secrets": "network-secrets"
+        "nixpkgs": "nixpkgs"
       }
     }
   },
