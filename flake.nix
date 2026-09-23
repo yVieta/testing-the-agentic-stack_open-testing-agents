@@ -20,6 +20,7 @@
       pkgs.mkShell {
         packages = with pkgs; [
           just
+          go-task
           python3
           python3Packages.pip
           dhall # .dhall/ sources
