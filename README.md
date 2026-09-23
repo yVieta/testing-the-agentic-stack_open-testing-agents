@@ -223,9 +223,9 @@ The System under test can be setted up via Terraform which deploys the juice-sho
 - In the resource folders are our sources listed that we used
 
 ## Disclaimer
-- This project ist mostly written without using anikind of Generative AI 
-- Only Open Models which are selfhosted are used in this project
+- This project ist mostly written without using any kind of Generative AI 
+- Only open models which are selfhosted are used in this project
 
 ## Contributions
-- Contributions are welcomed but restrictive using generative AI. There must be atleast a human behind the requests who needs to explain why they made the chage.
-
+- Contributions are welcomed but restrictive using generative AI. There must be atleast a human
+  behind the requests who needs to explain why they made the change.
