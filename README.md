@@ -8,27 +8,40 @@ manager** — you do **not** need to be on NixOS. Host systems (the MQTT
 broker, the SUT, optional GPU / model / database servers) are provisioned
 with **Terraform/OpenTofu**.
 
-```
-                 ┌─────────────────────────┐
-                 │   local web server      │  (system under test, on the LAN)
-                 └────────────┬────────────┘
-                              │ http (10.0.0.20)
-        ┌─────────────┬───────┴────────┬─────────────┐
-        ▼             ▼                ▼             ▼
-  ┌───────────┐ ┌───────────┐  ┌──────────────┐  ┌────────────────┐
-  │ PI 1      │ │ PI 2      │  │ PI 3         │  │  64-bit GPU    │
-  │   e2e     │ │ pentester │  │ test manager │  │ MQTT broker    │
-  │ engineer  │ │           │  │              │  │ (via Tofu)     │
-  └───────────┘ └───────────┘  └──────────────┘  └───────┬────────┘
-        └────────── MQTT (1883 / 8883) ──┬───────────────┘
-                                         │
-       ┌─────────────────┬───────────────┴─── More Servers with GPUS if we want more
-       ▼                 ▼
- ┌─────────────┐  ┌─────────────┐
- │ 64-bit GPU  │  │  extra...   │
- │ server      │  │  add more   │
- │  model, db  │  │  with GPU   │
- └─────────────┘  └─────────────┘
+```mermaid
+graph TD
+    SUT["<b>local web server</b><br/>system under test, on the LAN<br/>http IP_ADDRESS"]
+
+    subgraph PIS["Raspberry Pis — one agent + one MQTT worker each"]
+        direction LR
+        PI1["<b>PI 1</b><br/>e2e engineer"]
+        PI2["<b>PI 2</b><br/>pentester"]
+        PI3["<b>PI 3</b><br/>test manager"]
+    end
+
+    subgraph SERVERS["64-bit GPU servers (provisioned via OpenTofu)"]
+        direction LR
+        BROKER["<b>MQTT broker</b>"]
+        GPU["model, database"]
+        MORE["extra...<br/>add more with GPU"]
+    end
+
+    SUT <-->|"http"| PI1
+    SUT <-->|"http"| PI2
+    SUT <-->|"http"| PI3
+
+    BROKER <-->|"MQTT 1883 / 8883"| PI1
+    BROKER <--> PI2
+    BROKER <--> PI3
+    BROKER <--> GPU
+    BROKER <--> MORE
+
+    classDef sut fill:#e8f0fe,stroke:#4285f4,color:#202124;
+    classDef pi fill:#e6f4ea,stroke:#34a853,color:#202124;
+    classDef server fill:#fef7e0,stroke:#fbbc04,color:#202124;
+    class SUT sut;
+    class PI1,PI2,PI3 pi;
+    class BROKER,GPU,MORE server;
 ```
 
 Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
