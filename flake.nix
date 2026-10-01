@@ -19,16 +19,18 @@
     devShell = pkgs:
       pkgs.mkShell {
         packages = with pkgs; [
+          agda
           just
           go-task
           python3
           python3Packages.pip
           dhall # .dhall/ sources
-          dhall-json # dhall-to-json / json-to-dhall (used by `make`)
+          dhall-json # dhall-to-json / json-to-dhall (used by `just`)
           jq
           mosquitto
           pipenv
           opentofu
+          elan # the end of agda for this case?
         ];
       };
   in {

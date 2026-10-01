@@ -56,7 +56,7 @@ with dedicated resources.
 |--------------------------|----------------|-------------------|--------------------------------|
 | `crew/start`             | trigger (we)   | PI 1 (e2e)        | anything (kickoff)             |
 | `crew/pentester/input`   | PI 1 (e2e)     | PI 2 (pentester)  | playwright output              |
-| `crew/manager/input`     | PI 2 (pentester)| PI 3 (manager)   | security findings              |
+| `crew/manager/input`     | PI 2 (sec-test)| PI 3 (manager)    | security findings              |
 | `crew/proof/verify`      | Any Agent      | Agda Service      | Agda source code / properties  |
 | `crew/proof/feedback`    | Agda Service   | Origin Agent      | Type-checking logs / AST errors|
 | `crew/final`             | PI 3 (manager) | monitor/dashboard | final markdown report          |
