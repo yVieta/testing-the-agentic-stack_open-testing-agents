@@ -19,11 +19,11 @@ graph TD
         PI3["<b>PI 3</b><br/>test manager"]
     end
 
-    subgraph SERVERS["64-bit GPU servers (provisioned via OpenTofu)"]
-        direction LR
-        BROKER["<b>MQTT broker</b>"]
-        GPU["model, database"]
-        MORE["extra...<br/>add more with GPU"]
+    subgraph SERVERS["Self-Hosted Hardware Server (8GB GPU / 16GB RAM)"]
+        direction TB
+        BROKER["<b>MQTT broker</b><br/>EMQX Central Hub"]
+        AGDA["<b>Agda Proof Assistant</b><br/>Formal Agent Harnessing & Tuning"]
+        GPU["<b>Model & Database Server</b><br/>Llama-3-8B-Instruct (Q4_K_M)"]
     end
 
     SUT <-->|"http"| PI1
@@ -34,21 +34,21 @@ graph TD
     BROKER <--> PI2
     BROKER <--> PI3
     BROKER <--> GPU
-    BROKER <--> MORE
+    BROKER <--> AGDA
 
     classDef sut fill:#e8f0fe,stroke:#4285f4,color:#202124;
     classDef pi fill:#e6f4ea,stroke:#34a853,color:#202124;
     classDef server fill:#fef7e0,stroke:#fbbc04,color:#202124;
     class SUT sut;
     class PI1,PI2,PI3 pi;
-    class BROKER,GPU,MORE server;
+    class BROKER,GPU,AGDA server;
 ```
 
 Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
 results: e2e → pentester → test manager → final report, all over MQTT topics.
-The **64-bit servers with GPU** (broker plus any number of GPU servers) join the same network
-over MQTT, so the crew can offload model inference and databases onto machines
-with dedicated GPUs.
+The **64-bit hardware server** (broker, Agda validator, and local LLM host) joins the same network
+over MQTT, so the crew can offload formal proof verification, model inference, and databases onto machines
+with dedicated resources.
 
 ## Architecture
 
@@ -57,6 +57,8 @@ with dedicated GPUs.
 | `crew/start`             | trigger (we)   | PI 1 (e2e)        | anything (kickoff)             |
 | `crew/pentester/input`   | PI 1 (e2e)     | PI 2 (pentester)  | playwright output              |
 | `crew/manager/input`     | PI 2 (pentester)| PI 3 (manager)   | security findings              |
+| `crew/proof/verify`      | Any Agent      | Agda Service      | Agda source code / properties  |
+| `crew/proof/feedback`    | Agda Service   | Origin Agent      | Type-checking logs / AST errors|
 | `crew/final`             | PI 3 (manager) | monitor/dashboard | final markdown report          |
 | `crew/status/<role>`     | each worker    | monitor           | JSON lifecycle state           |
 
@@ -67,14 +69,32 @@ with dedicated GPUs.
   `build/<role>/.env` (never committed); the roles' MQTT passwords are set on
   the broker.
 
+## Formal Verification with Agda
+
+To enforce rigorous behavior and prevent hallucination cycles during agent collaboration, **Agda** is introduced as a interactive proof assistant. 
+- **Harnessing:** Agent action boundaries, tool pre-conditions, and state transitions are modeled as formal types in Agda.
+- **Tuning:** Agents can emit structural changes or code parameters along with an Agda specification file to `crew/proof/verify`. The tuning parameters are only accepted if the Agda compiler successfully type-checks the safety proofs, providing a mathematically guaranteed sandbox loop.
+
+## Hardware & Local Model Specs
+
+The infrastructure utilizes a single self-hosted server with the following constraints:
+* **System RAM:** 16 GB
+* **GPU VRAM:** 8 GB
+
+### Fitted Model Selection
+To stay within the **8GB VRAM** safety envelope while leaving room for the system OS, EMQX broker, and Agda type-checker, we deploy:
+* **Model:** `Llama-3-8B-Instruct`
+* **Quantization:** `Q4_K_M` (4-bit medium GGUF quantization)
+* **Resource Footprint:** ~4.8 GB VRAM allocation when run via `llama.cpp` or `Ollama`, leaving ~3.2 GB VRAM headroom and ample system memory for processing complex context windows without context swapping.
+
 ## Tools from nixpkgs — no NixOS required
 
 Installing nixpkgs in your non NixOS
 ```sh
-curl -sSf -L https://install.lix.systems/lix | sh -s -- install
+curl -sSf -L https://lix.systems | sh -s -- install
 ```
 
-All packagess are in the flake.nix just run 
+All packages (including the **Agda** compiler and structural libraries) are in the `flake.nix`. Just run:
 ```sh
 nix develop
 ```
@@ -88,7 +108,7 @@ Pis and on your dev machine.
 - `worker/worker.py` — the MQTT worker each role runs
 - `sut-setup/` — TF that configures the host systems (services)
 - `hosts/`, `modules/` — optional NixOS config for the broker host
-- `flake.nix` — the `nix develop` shell (nixpkgs as flake input)
+- `flake.nix` — the `nix develop` shell (nixpkgs as flake input, containing Agda + dependencies)
 - `Makefile` — compiles the crews (`make`)
 - `resources/` — papers, `knowledge/`, `skills/` the agents use
 
@@ -97,30 +117,16 @@ Pis and on your dev machine.
 - Three Raspberry Pis running **Raspberry Pi OS (Any Linux with Systemd, aarch64)**
 - The **Nix package manager** (nixpkgs provides every tool; see above —
   NixOS is *not* required)
-- A host system (x86_64 Linux) for the SUT + MQTT broker, set up with
-  TF (`sut-setup/`)
-- Optional: extra **64-bit server with GPU**, carrying a GPU to serve local models
-  and databases to the crew
+- One host system (x86_64 Linux) featuring an **8GB GPU and 16GB RAM** for the SUT + MQTT broker + local model server, set up with TF (`sut-setup/`)
 - A local web server to test, reachable from every Pi (the TF setup
-  deploys Juice Shop for us): https://owasp.org/projects/juice-shop
+  deploys Juice Shop for us): https://owasp.org
 
 ## Quick local experiment
 
 ```sh
-nix develop                          
-make                                 # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .                     # crewai[tools] + paho-mqtt
-# per role: build/<role>/.env with broker + target + role, e.g.
-cat > build/pi1-e2e/.env <<'EOF'
-BROKER_HOST=10.0.0.10
-BROKER_USERNAME=pi1-e2e
-BROKER_PASSWORD=change-me
-TARGET_URL=http://10.0.0.20
-EOF
-cd build/pi1-e2e && python3 ../../worker/worker.py --verbose
-# ...repeat on the other two roles, then from anywhere:
-mosquitto_pub -h BROKER -t crew/start -m 'go'
+nix develop
+# For the settings of the agents for align crewai                          
+just  # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
 ```
 
 ## Host systems via Terraform/OpenTofu 
@@ -146,13 +152,9 @@ tune `bind_address` / `expose_public` in `sut-setup/variables.tf`. Tear down
 with `systemctl --user stop <service>` then `tofu destroy`. Details in
 `sut-setup/README.md`.
 
-## Adding extra servers (GPU / models / database)
+## Managing the Compute Server (GPU / models / database / Agda)
 
-Want more compute? Add another **64-bit server with GPU**, deploy your model
-servers and databases there, and let it join the crew over MQTT — nothing on
-the Pis changes. The nixpkgs-hosted tooling also lets you manage these servers
-the same way (or keep them on NixOS via the optional `broker` deployment in
-`flake.nix`).
+The nixpkgs-hosted tooling lets you manage this backend architecture uniformly (or lock it down on NixOS via the optional `broker` deployment in `flake.nix`). The 4-bit quantized model and the Agda service share this node's system memory footprint seamlessly via isolated process parameters.
 
 ## Further Notes
 
@@ -168,3 +170,4 @@ the same way (or keep them on NixOS via the optional `broker` deployment in
 - Contributions are welcomed but restrictive using generative AI. There must
   be at least a human behind the requests who needs to explain why they made
   the change.
+

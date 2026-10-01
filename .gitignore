@@ -7,3 +7,4 @@ wheels/
 .venv
 build/
 secrets/
+.DS_Store
