@@ -7,7 +7,10 @@
 
 ## Others
 - https://arxiv.org/html/2501.00217v1
+- https://arxiv.org/html/2407.03203
+
+## Extension which are WIP
 - https://github.com/formalverification/agda-native-air
 
-
-
+## Offtopics for Agentic AI testing which can be still inspirational
+- https://arxiv.org/pdf/2510.12787
