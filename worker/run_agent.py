@@ -23,8 +23,9 @@ ROLE = os.environ.get("CREW_ROLE", "e2e_test_agent")
 CREW_DIR = Path(os.environ.get("CREW_DIR", REPO / "build" / ROLE))
 WORK = Path(os.environ.get("WORK_DIR", "/tmp/crew"))  # writable scratch (repo is ro)
 
-MODEL_URL = os.environ.get("MODEL_URL", "http://127.0.0.1:18080/v1")
-MODEL_URL = MODEL_URL.rstrip("/") + ("/v1" if MODEL_URL.rstrip("/").endswith("/v1") == False else "")
+MODEL_URL = os.environ.get("MODEL_URL", "http://127.0.0.1:18080/v1").rstrip("/")
+if not MODEL_URL.endswith("/v1"):
+    MODEL_URL += "/v1"
 MODEL_NAME = os.environ.get("MODEL_NAME", "phi-4-mini")
 TARGET_URL = os.environ.get("TARGET_URL", "")
 DSN = os.environ.get("POSTGRES_DSN", "")

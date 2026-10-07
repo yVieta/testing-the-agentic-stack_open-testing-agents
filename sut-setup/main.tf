@@ -111,10 +111,9 @@ resource "null_resource" "start_services" {
       user=$(id -un)
       wants=${var.home_dir}/.config/systemd/user/default.target.wants
       mkdir -p "$wants"
-      for s in mqtt-broker juice-shop grafana; do
+      for s in juice-shop grafana; do
         systemctl --user stop "$s.service" 2>/dev/null || true
       done
-      rm -f "$wants/mqtt-broker.service"
       ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
       loginctl enable-linger "$user"
       systemctl --user daemon-reload
