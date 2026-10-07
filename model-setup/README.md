@@ -1,7 +1,7 @@
 # model-setup
 
 Terraform/OpenTofu for the model + vector-store side of the self-hosted server:
-**Qwen3-Coder** served by llama.cpp, **PostgreSQL + pgvector**, and **Qdrant**,
+**Phi-4** served by llama.cpp, **PostgreSQL + pgvector**, and **Qdrant**,
 all as Podman Quadlet container services in a single pod.
 
 Mirrors the layout of [`../sut-setup`](../sut-setup): `tofu apply` writes the
@@ -11,8 +11,8 @@ Quadlet units, and systemd user services do the rest.
 
 | Service             | Unit               | Host port | Notes                                            |
 |---------------------|---------------------- |-----------|--------------------------------------------------|
-| Qwen3-Coder (30B-A3B)| `qwen-coder.service`| 18080   | llama.cpp, OpenAI-compatible `/v1`               |
-| PostgreSQL + pgvector| `postgres.service` | 15432    | `aigents` database, schema seeded on first boot  |
+| Phi-4 (14B)         | `phi-4.service`      | 18080     | llama.cpp, OpenAI-compatible `/v1`               |
+| PostgreSQL + pgvector| `postgres.service` | 15432     | `aigents` database, schema seeded on first boot  |
 | Qdrant              | `qdrant.service`    | 16333 / 16334 | HTTP / gRPC, API key enforced on data endpoints |
 
 `model-fetch.service` is a one-shot unit that downloads the GGUF weights; it is
@@ -29,16 +29,16 @@ tofu apply
 systemctl --user start model-fetch.service
 
 # 2. start the server
-systemctl --user start qwen-coder.service
+systemctl --user start phi-4.service
 
 # 3. manuel test the connection
 curl http://127.0.0.1:18080/health
 curl http://127.0.0.1:18080/v1/models
 ```
 
-`qwen-coder.service` carries `ConditionPathExists=<weights>`, so it stays
+`phi-4.service` carries `ConditionPathExists=<weights>`, so it stays
 `inactive` until step 1 has put the file in place. Watch either job with
-`journalctl --user -fu model-fetch` / `-fu qwen-coder`.
+`journalctl --user -fu model-fetch` / `-fu phi-4`.
 
 Credentials are generated on first apply and written to
 `/var/spool/aigents/database/secrets/credentials.env` (mode 0600):
@@ -75,7 +75,7 @@ Note that `/var/spool/aigents/containers/storage` is now the graphroot for
 `postgres/initdb/01-aigents-schema.sql` runs once via the pgvector image's
 initdb hook and creates the `vector` extension, `documents`,
 `document_embeddings`, and the `match_documents()` cosine-distance lookup
-function. Embeddings are `vector(2048)` to match Qwen3's hidden size —
+function. Embeddings are `vector(4096)` to match Phi-4's hidden size —
 override with `embedding_dimensions` **only before the first boot**, since the
 initdb hook never re-runs on an existing `PGDATA`. To change it later, drop and
 recreate the cluster:
@@ -127,7 +127,7 @@ tofu apply -var 'model_api_key=<bearer-token>'
 ## Teardown
 
 ```sh
-systemctl --user stop qwen-coder.service postgres.service qdrant.service
+systemctl --user stop phi-4.service postgres.service qdrant.service
 systemctl --user stop aigents-pod.service
 tofu destroy
 ```

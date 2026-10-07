@@ -1,5 +1,8 @@
 # external resource we used
 
+## Models
+- https://github.com/microsoft/PhiCookBook
+
 ## For fine tuning
 - https://odr.chalmers.se/bitstreams/f68aff4a-3865-41b0-ac54-2ce3d917e783/download
 - https://arxiv.org/html/2408.13296v1

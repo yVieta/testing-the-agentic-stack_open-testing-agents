@@ -189,10 +189,10 @@ resource "local_file" "qdrant_quadlet" {
   })
 }
 
-resource "local_file" "qwen_coder_quadlet" {
-  filename        = "${local.expanded_quadlet_dir}/qwen-coder.container"
+resource "local_file" "phi4_quadlet" {
+  filename        = "${local.expanded_quadlet_dir}/phi-4.container"
   file_permission = "0600"
-  content = templatefile("${local.module_dir}/quadlet/qwen-coder.container.tftpl", {
+  content = templatefile("${local.module_dir}/quadlet/phi-4.container.tftpl", {
     pod_unit           = local.pod_unit
     pod_file           = local.pod_file
     image_pull_policy  = var.image_pull_policy
@@ -368,12 +368,12 @@ resource "local_file" "mcp_unit" {
   file_permission = "0600"
   content         = <<-EOT
     [Unit]
-    Description=MCP server exposing Qwen3-Coder to the crewAI agents
+    Description=MCP server exposing Phi-4 to the crewAI agents
     Documentation=file://${local.mcp_script}
-    # No Requires=qwen-coder.service on purpose: the weights take minutes to
+    # No Requires=phi-4.service on purpose: the weights take minutes to
     # mmap, and requiring them would keep this port down for the whole load.
     # While the model is down the tools return "cannot reach model" instead.
-    After=qwen-coder.service
+    After=phi-4.service
 
     [Service]
     Type=simple
@@ -440,7 +440,7 @@ resource "null_resource" "start_services" {
     local_file.pod,
     local_file.postgres_quadlet,
     local_file.qdrant_quadlet,
-    local_file.qwen_coder_quadlet,
+    local_file.phi4_quadlet,
     local_file.model_fetch_quadlet,
     local_file.initdb_schema,
     local_sensitive_file.credentials_env,
@@ -454,7 +454,7 @@ resource "null_resource" "start_services" {
     pod          = local_file.pod.content
     postgres     = local_file.postgres_quadlet.content
     qdrant       = local_file.qdrant_quadlet.content
-    model        = local_file.qwen_coder_quadlet.content
+    model        = local_file.phi4_quadlet.content
     model_fetch  = local_file.model_fetch_quadlet.content
     fetch_script = filesha256("${local.scripts_dir}/fetch-gguf.sh")
     schema       = local_file.initdb_schema.content
@@ -462,7 +462,7 @@ resource "null_resource" "start_services" {
   }
 
   provisioner "local-exec" {
-    # The model weights are ~18.6 GB, so qwen-coder only starts once
+    # The model weights are ~8.5 GB, so phi-4 only starts once
     # model-fetch.service has put the GGUF in place. Everything else comes up
     # immediately.
     command = <<-EOT
@@ -476,7 +476,7 @@ resource "null_resource" "start_services" {
         loginctl enable-linger "$user" || true
       fi
 
-      systemctl --user stop qwen-coder.service 2>/dev/null || true
+      systemctl --user stop phi-4.service 2>/dev/null || true
       systemctl --user stop postgres.service qdrant.service 2>/dev/null || true
       systemctl --user stop ${local.pod_name}-pod.service 2>/dev/null || true
 

@@ -20,7 +20,7 @@ graph TD
         direction TB
         BROKER["<b>MQTT broker</b><br/>EMQX Central Hub"]
         AGDA["<b>Agda Proof Assistant</b><br/>Formal Agent Harnessing & Tuning"]
-        GPU["<b>Model & Database Server</b><br/>Llama-3-8B-Instruct (Q4_K_M)"]
+        GPU["<b>Model & Database Server</b><br/>Phi-4 (Q4_K_M)"]
     end
 
     SUT <-->|"http"| PI1
@@ -43,7 +43,7 @@ graph TD
 
 Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
 results: e2e -> pentester -> test manager -> final report, all over MQTT topics.
-The **64-bit hardware server** (broker, Agda/Lean validator, and local LLM host) joins the same network
+The **64-bit hardware server** (broker, Lean validator, and local LLM host) joins the same network
 over MQTT, so the crew can offload formal proof verification, model inference, and databases onto machines
 with dedicated resources.
 
@@ -59,11 +59,12 @@ with dedicated resources.
 | `crew/final`             | PI 3 (manager) | monitor/dashboard | final markdown report          |
 | `crew/status/<role>`     | each worker    | monitor           | JSON lifecycle state           |
 
-## Formal Verification with Agda eventually switching to Lean4
+## Formal Verification with Lean4
 
-To enforce rigorous behavior and prevent hallucination cycles during agent collaboration, **Agda** is introduced as a interactive proof assistant. 
+To enforce rigorous behavior and prevent hallucination cycles during agent collaboration, **Lean4** is introduced as a interactive proof assistant. 
 - **Harnessing:** Agent action boundaries, tool pre-conditions, and state transitions are modeled as formal types in Agda.
-- **Tuning:** Agents can emit structural changes or code parameters along with an Agda specification file to `crew/proof/verify`. The tuning parameters are only accepted if the Agda compiler successfully type-checks the safety proofs, providing a mathematically guaranteed sandbox loop.
+- **Tuning:** Agents can emit structural changes or code parameters along with an Lean4 specification file to `crew/proof/verify`. The tuning parameters are only accepted if the Lean4 compiler successfully type-checks the safety proofs, providing a mathematically guaranteed sandbox loop.
+- Agda will be deprecated in this project but can be use as a source for traceability
 
 ## Hardware & Local Model Specs
 
@@ -73,9 +74,9 @@ The infrastructure utilizes a single self-hosted server with the following const
 
 ### Fitted Model Selection
 To stay within the **8GB VRAM** safety envelope while leaving room for the system OS, EMQX broker, and Agda type-checker, we deploy:
-* **Model:** `Llama-3-8B-Instruct`
+* **Model:** `Phi-4` (14B)
 * **Quantization:** `Q4_K_M` (4-bit medium GGUF quantization)
-* **Resource Footprint:** ~4.8 GB VRAM allocation when run via `llama.cpp` or `Ollama`, leaving ~3.2 GB VRAM headroom
+* **Resource Footprint:** should fitting within the 8 GB VRAM budget
 
 ## Tools from nixpkgs — no NixOS required
 
@@ -97,7 +98,7 @@ Pis and on your dev machine.
 - `.dhall/` — crew + agent definitions (Dhall; the single source of truth)
 - `worker/worker.py` — the MQTT worker each role runs
 - `sut-setup/` — TF that configures the host systems (SUT, broker, Grafana, nginx)
-- `model-setup/` — TF for the model + vector store node (Qwen3-Coder via llama.cpp, PostgreSQL + pgvector, Qdrant)
+- `model-setup/` — TF for the model + vector store node (Phi-4 via llama.cpp, PostgreSQL + pgvector, Qdrant)
 - `pi-setup/` — TF for the per-Pi agent/worker services
 - `hosts/`, `modules/` — optional NixOS config for the broker host
 - `flake.nix` — the `nix develop` shell (nixpkgs as flake input, containing Agda + dependencies)
@@ -149,7 +150,7 @@ with `systemctl --user stop <service>` then `tofu destroy`. Details in
 `model-setup/` provisions the model node the same way — Quadlet units, one pod,
 nothing hand-edited:
 
-- **Qwen3-Coder 30B-A3B** (`Q4_K_M` GGUF) served by **llama.cpp** on
+- **Phi-4 (14B)** (`Q4_K_M` GGUF) served by **llama.cpp** on
   `127.0.0.1:18080`, OpenAI-compatible `/v1`
 - **PostgreSQL + pgvector** on `:15432` (`documents`, `document_embeddings`,
   `match_documents()`)
@@ -158,8 +159,8 @@ nothing hand-edited:
 ```sh
 cd model-setup
 tofu init && tofu apply
-systemctl --user start model-fetch.service   # downloads the ~18.6 GB GGUF
-systemctl --user start qwen-coder.service    # first start mmaps it, takes minutes
+systemctl --user start model-fetch.service   
+systemctl --user start phi-4.service         
 curl http://127.0.0.1:18080/health
 ```
 
@@ -173,7 +174,7 @@ Note that `sut-setup/` and `model-setup/` share one Podman image store
 (`/var/spool/aigents/containers/storage`); the graphroot is configured once,
 globally, because per-unit storage overrides break pod starts.
 
-## Managing the Compute Server (GPU / models / database / Agda)
+## Managing the Compute Server (GPU , models , database , Agda/Lean4 )
 
 The nixpkgs-hosted tooling lets you manage this backend architecture uniformly (or lock it down on NixOS via the optional `broker` deployment in `flake.nix`). The 4-bit quantized model and the Agda service share this node's system memory footprint seamlessly via isolated process parameters.
 

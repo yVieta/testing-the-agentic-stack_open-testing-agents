@@ -20,6 +20,8 @@
       pkgs.mkShell {
         packages = with pkgs; [
           agda
+          elan
+          lean4
           just
           go-task
           python3
@@ -30,7 +32,6 @@
           mosquitto
           pipenv
           opentofu
-          elan # the end of agda for this case?
         ];
       };
   in {

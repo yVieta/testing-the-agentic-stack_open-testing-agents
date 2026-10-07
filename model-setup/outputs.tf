@@ -49,7 +49,7 @@ output "services" {
     "${local.pod_unit}",
     "postgres.service",
     "qdrant.service",
-    "qwen-coder.service",
+    "phi-4.service",
     "model-fetch.service",
   ]
 }
@@ -60,7 +60,7 @@ output "quadlet_files" {
     pod          = local_file.pod.filename
     postgres     = local_file.postgres_quadlet.filename
     qdrant       = local_file.qdrant_quadlet.filename
-    qwen_coder   = local_file.qwen_coder_quadlet.filename
+    phi4         = local_file.phi4_quadlet.filename
     model_fetch  = local_file.model_fetch_quadlet.filename
     storage_conf = local_file.storage_conf.filename
   }
@@ -69,8 +69,8 @@ output "quadlet_files" {
 output "post_apply_steps" {
   description = "What still has to happen after apply."
   value = [
-    "systemctl --user start model-fetch.service   # downloads ${var.model_file} (~18.6 GB) into ${local.model_dir}",
-    "systemctl --user start qwen-coder.service    # first start mmaps the weights, expect several minutes",
+    "systemctl --user start model-fetch.service   # downloads ${var.model_file} (~8.5 GB) into ${local.model_dir}",
+    "systemctl --user start phi-4.service    # first start mmaps the weights, expect several minutes",
     "curl http://${var.bind_address}:${local.model_port}/health",
     "curl http://${var.bind_address}:${local.model_port}/v1/models",
   ]
@@ -84,7 +84,7 @@ output "mcp" {
     bind     = var.mcp_bind_address
     port     = var.mcp_port
     token    = "see ${local.credential_file} (mode 0600)"
-    tools    = ["qwen_chat", "qwen_complete", "qwen_info"]
+    tools    = ["phi4_chat", "phi4_complete", "phi4_info"]
     services = var.enable_mcp_server ? ["aigents-mcp.service"] : []
   }
 }

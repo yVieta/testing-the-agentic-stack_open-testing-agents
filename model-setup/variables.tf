@@ -56,14 +56,14 @@ variable "model_image" {
 
 variable "model_repo" {
   type        = string
-  description = "Hugging Face repository holding the GGUF build of Qwen3-Coder."
-  default     = "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF"
+  description = "Hugging Face repository holding the GGUF build of Phi-4."
+  default     = "microsoft/Phi-4-GGUF"
 }
 
 variable "model_file" {
   type        = string
-  description = "GGUF file inside model_repo. Q4_K_M of the 30B-A3B MoE is ~18.6 GB and is the smallest useful quantization for this host's 15 GB RAM."
-  default     = "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+  description = "GGUF file inside model_repo. Q4_K_M of the 14B model is ~8.5 GB and fits within the 8 GB VRAM budget."
+  default     = "Phi-4-Q4_K_M.gguf"
 }
 
 variable "model_sha256" {
@@ -75,12 +75,12 @@ variable "model_sha256" {
 variable "model_alias" {
   type        = string
   description = "Model name reported by the OpenAI-compatible /v1/models endpoint."
-  default     = "qwen3-coder-30b-a3b-instruct"
+  default     = "phi-4"
 }
 
 variable "model_context_size" {
   type        = number
-  description = "KV cache context window. 30B-A3B at Q4_K_M is ~18.6 GB and is mmap'd from disk, so a small window is what keeps this host out of swap."
+  description = "KV cache context window. Phi-4 at Q4_K_M is ~8.5 GB and is mmap'd from disk, so a small window is what keeps this host out of swap."
   default     = 16384
 }
 
@@ -162,8 +162,8 @@ variable "postgres_password" {
 
 variable "embedding_dimensions" {
   type        = number
-  description = "Dimensionality of the embeddings stored in pgvector. Matches Qwen3's hidden size."
-  default     = 2048
+  description = "Dimensionality of the embeddings stored in pgvector. Matches Phi-4's hidden size."
+  default     = 4096
 }
 
 
