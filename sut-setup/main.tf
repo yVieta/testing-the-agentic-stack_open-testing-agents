@@ -3,23 +3,12 @@ locals {
   expanded_nginx_dir   = var.nginx_config_dir == "~/.config/iacSUT/nginx" ? format("%s/.config/iacSUT/nginx", var.home_dir) : var.nginx_config_dir
 }
 
-resource "local_file" "mqtt_broker_quadlet" {
-  filename = "${local.expanded_quadlet_dir}/mqtt-broker.container"
-  content = templatefile(
-    "${path.module}/quadlet/mqtt-broker.container.tftpl",
-    {
-      mqtt_broker_image = var.mqtt_broker_image
-    }
-  )
-}
-
 resource "local_file" "juice_shop_quadlet" {
   filename = "${local.expanded_quadlet_dir}/juice-shop.container"
   content = templatefile(
     "${path.module}/quadlet/juice-shop.container.tftpl",
     {
       juice_shop_image = var.juice_shop_image
-      mqtt_port        = var.mqtt_port
     }
   )
 }
@@ -41,13 +30,10 @@ resource "local_file" "sut_pod_quadlet" {
   content = templatefile(
     "${path.module}/quadlet/sut.pod.tftpl",
     {
-      bind_address        = var.bind_address
-      nginx_http_port     = var.nginx_http_port
-      mqtt_port           = var.mqtt_port
-      mqtt_ws_port        = var.mqtt_ws_port
-      mqtt_dashboard_port = var.mqtt_dashboard_port
-      juice_shop_port     = var.juice_shop_port
-      grafana_port        = var.grafana_port
+      bind_address    = var.bind_address
+      nginx_http_port = var.nginx_http_port
+      juice_shop_port = var.juice_shop_port
+      grafana_port    = var.grafana_port
     }
   )
 }
@@ -82,9 +68,6 @@ resource "null_resource" "open_firewall" {
   triggers = {
     ports = join(",", [
       var.nginx_http_port,
-      var.mqtt_port,
-      var.mqtt_ws_port,
-      var.mqtt_dashboard_port,
       var.juice_shop_port,
       var.grafana_port,
     ])
@@ -94,7 +77,7 @@ resource "null_resource" "open_firewall" {
   provisioner "local-exec" {
     command = <<-EOT
       set -eux
-      for p in ${var.nginx_http_port} ${var.mqtt_port} ${var.mqtt_ws_port} ${var.mqtt_dashboard_port} ${var.juice_shop_port} ${var.grafana_port}; do
+      for p in ${var.nginx_http_port} ${var.juice_shop_port} ${var.grafana_port}; do
         doas sh -c 'command -v iptables >/dev/null 2>&1 || exit 0
           iptables -C INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment security-sut 2>/dev/null ||
             iptables -I INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment security-sut' sh "$p"
@@ -105,7 +88,6 @@ resource "null_resource" "open_firewall" {
 
 resource "null_resource" "start_services" {
   depends_on = [
-    local_file.mqtt_broker_quadlet,
     local_file.juice_shop_quadlet,
     local_file.grafana_quadlet,
     local_file.sut_pod_quadlet,
@@ -116,7 +98,6 @@ resource "null_resource" "start_services" {
 
   triggers = {
     pod        = local_file.sut_pod_quadlet.content
-    mqtt       = local_file.mqtt_broker_quadlet.content
     juice      = local_file.juice_shop_quadlet.content
     grafana    = local_file.grafana_quadlet.content
     nginx      = local_file.nginx_proxy_quadlet.content
@@ -130,10 +111,10 @@ resource "null_resource" "start_services" {
       user=$(id -un)
       wants=${var.home_dir}/.config/systemd/user/default.target.wants
       mkdir -p "$wants"
-      rm -f "$wants/mqtt-broker.service" "$wants/juice-shop.service" "$wants/grafana.service"
       for s in mqtt-broker juice-shop grafana; do
         systemctl --user stop "$s.service" 2>/dev/null || true
       done
+      rm -f "$wants/mqtt-broker.service"
       ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
       loginctl enable-linger "$user"
       systemctl --user daemon-reload

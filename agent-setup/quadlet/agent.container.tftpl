@@ -1,0 +1,25 @@
+[Unit]
+Description=aigents testing agent ${agent_role} (crew ${role_dir})
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${image}
+Pull=never
+Network=host
+Volume=${repo_dir}:/repo:ro,Z
+Volume=${credential_file}:/run/secrets/credentials.env:ro,Z
+Environment=CREW_ROLE=${agent_role}
+Environment=CREW_DIR=/repo/build/${role_dir}
+Environment=MODEL_URL=${model_url}
+Environment=MODEL_NAME=${model_name}
+Environment=TARGET_URL=${target_url}
+Environment=RUN_INTERVAL=900
+Exec=python3 /repo/worker/run_agent.py
+
+[Service]
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

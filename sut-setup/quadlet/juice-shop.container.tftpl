@@ -7,7 +7,6 @@ Requires=sut-pod.service
 Image=${juice_shop_image}
 Pull=newer
 Pod=sut.pod
-Environment=MQTT_BROKER_URL=mqtt://127.0.0.1:${mqtt_port}
 HealthCmd=/nodejs/bin/node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 HealthInterval=30s
 

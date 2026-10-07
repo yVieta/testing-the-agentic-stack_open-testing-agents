@@ -1,4 +1,4 @@
-# State holds the generated Postgres password and Qdrant API key in plaintext
+# State holds the generated Postgres password in plaintext
 # (local_sensitive_file.credentials_env + random_password results). Never commit.
 terraform.tfstate
 terraform.tfstate.backup

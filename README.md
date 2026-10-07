@@ -1,195 +1,158 @@
 # open-testing-agents-paiselfhost
 
-Most tools are pulled from the **nixpkgs** package set via the **Nix package
-manager** — you do **not** need to be on NixOS. Host systems (the MQTT
-broker, the SUT, optional GPU / model / database servers) are provisioned
-with **Terraform/OpenTofu**.
+Self-hosted testing agents: three crewAI agents run **locally** on one server as
+Podman **Quadlet** services, each connecting **directly** to a self-hosted
+**phi-4-mini** model (llama.cpp) and a **PostgreSQL + pgvector** store. There is
+**no MQTT broker** and no Raspberry Pi fleet anymore — everything lives on one
+host and is declared in files, never hand-edited.
+
+Tooling comes from the **nixpkgs** package set via the **Nix package manager**
+(no NixOS required). Host services are provisioned with **OpenTofu**:
+`model-setup/` renders a **podman-compose** stack for the database and AI model,
+and `agent-setup/` renders the agent Quadlet units.
 
 ```mermaid
 graph TD
-    SUT["<b>local web server</b><br/>system under test, on the LAN<br/>http IP_ADDRESS"]
+    SUT["<b>local web server</b><br/>system under test (Juice Shop)<br/>http://127.0.0.1:80"]
 
-    subgraph PIS["Raspberry Pis — one agent + one MQTT worker each"]
+    subgraph AGENTS["Podman Quadlet services (same host)"]
         direction LR
-        PI1["<b>PI 1</b><br/>e2e engineer"]
-        PI2["<b>PI 2</b><br/>pentester"]
-        PI3["<b>PI 3</b><br/>test manager"]
+        A1["<b> </b><br/>e2e engineer"]
+        A2["<b> </b><br/>pentester"]
+        A3["<b> </b><br/>test manager"]
     end
 
-    subgraph SERVERS["Self-Hosted Hardware Server (8GB GPU / 16GB RAM)"]
+    subgraph STACK["podman-compose stack (`aigents`)"]
         direction TB
-        BROKER["<b>MQTT broker</b><br/>EMQX Central Hub"]
-        AGDA["<b>Agda Proof Assistant</b><br/>Formal Agent Harnessing & Tuning"]
-        GPU["<b>Model & Database Server</b><br/>Phi-4 (Q4_K_M)"]
+        MODEL["<b>phi-4-mini</b><br/>llama.cpp :18080"]
+        DB["<b>PostgreSQL + pgvector</b><br/>:15432"]
+        LEAN["<b>Lean4 harness</b><br/>tuning verification"]
     end
 
-    SUT <-->|"http"| PI1
-    SUT <-->|"http"| PI2
-    SUT <-->|"http"| PI3
-
-    BROKER <-->|"MQTT 1883 / 8883"| PI1
-    BROKER <--> PI2
-    BROKER <--> PI3
-    BROKER <--> GPU
-    BROKER <--> AGDA
+    A1 <-->|"http"| SUT
+    A2 <-->|"http"| SUT
+    A3 <-->|"http"| SUT
+    A1 --> MODEL
+    A2 --> MODEL
+    A3 --> MODEL
+    LEAN -. validates tuning .-> A1
+    LEAN -. validates tuning .-> A2
+    LEAN -. validates tuning .-> A3
+    A1 --> DB
+    A2 --> DB
+    A3 --> DB
 
     classDef sut fill:#e8f0fe,stroke:#4285f4,color:#202124;
-    classDef pi fill:#e6f4ea,stroke:#34a853,color:#202124;
-    classDef server fill:#fef7e0,stroke:#fbbc04,color:#202124;
+    classDef agent fill:#e6f4ea,stroke:#34a853,color:#202124;
+    classDef comp fill:#fef7e0,stroke:#fbbc04,color:#202124;
     class SUT sut;
-    class PI1,PI2,PI3 pi;
-    class BROKER,GPU,AGDA server;
+    class A1,A2,A3 agent;
+    class MODEL,DB,LEAN comp;
 ```
 
-Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
-results: e2e -> pentester -> test manager -> final report, all over MQTT topics.
-The **64-bit hardware server** (broker, Lean validator, and local LLM host) joins the same network
-over MQTT, so the crew can offload formal proof verification, model inference, and databases onto machines
-with dedicated resources.
+Agents chain results through shared files: e2e -> pentester -> test manager ->
+final report, each role writing `previous_output.md` for the next one
+(`worker/run_agent.py` stages a writable copy of its crew directory). All
+reports land in the `documents` table in Postgres.
 
 ## Architecture
 
-| Topic                    | Published by   | Consumed by       | Payload                        |
-|--------------------------|----------------|---------------------|-----------------------------------|
-| `crew/start`             | trigger (we)   | PI 1 (e2e)        | anything (kickoff)             |
-| `crew/pentester/input`   | PI 1 (e2e)     | PI 2 (pentester)  | playwright output              |
-| `crew/manager/input`     | PI 2 (sec-test)| PI 3 (manager)    | security findings              |
-| `crew/proof/verify`      | Any Agent      | Agda Service      | Agda source code / properties  |
-| `crew/proof/feedback`    | Agda Service   | Origin Agent      | Type-checking logs / AST errors|
-| `crew/final`             | PI 3 (manager) | monitor/dashboard | final markdown report          |
-| `crew/status/<role>`     | each worker    | monitor           | JSON lifecycle state           |
+| Role            | Crew dir            | Work                              | Output            |
+|-----------------|---------------------|-----------------------------------|-------------------|
+| e2e engineer    | `build/pi1-e2e`     | playwright tests against the SUT  | `previous_output.md` |
+| pentester       | `build/pi2-pentester` | nmap/nikto/sqlmap security scans | `previous_output.md` |
+| test manager    | `build/pi3-manager` | review + final report             | `report.md`       |
+
+Every cycle the worker asks the **Lean4 harness** to review the current tuning
+parameters (`skills/lean/Main.lean` — queue_size, dedupe_cap, crew_timeout,
+steps, step_cost). Only a verdict of `accepted` lets the crew run.
 
 ## Formal Verification with Lean4
 
-To enforce rigorous behavior and prevent hallucination cycles during agent collaboration, **Lean4** is introduced as a interactive proof assistant. 
-- **Harnessing:** Agent action boundaries, tool pre-conditions, and state transitions are modeled as formal types in Agda.
-- **Tuning:** Agents can emit structural changes or code parameters along with an Lean4 specification file to `crew/proof/verify`. The tuning parameters are only accepted if the Lean4 compiler successfully type-checks the safety proofs, providing a mathematically guaranteed sandbox loop.
-- Agda will be deprecated in this project but can be use as a source for traceability
+- **Harnessing:** agent action boundaries, tool pre-conditions and state
+  transitions are formal types in `skills/lean/AgentHarness.lean`.
+- **Tuning:** proposed parameters are only applied when
+  `AgentHarness.review` accepts them, giving a mathematically guaranteed
+  safety loop. (The Agda source in `skills/agda` is kept for traceability.)
 
-## Hardware & Local Model Specs
+## Hardware & Model Specs
 
-The infrastructure utilizes a single self-hosted server with the following constraints:
-* **System RAM:** 16 GB
-* **GPU VRAM:** 8 GB
-
-### Fitted Model Selection
-To stay within the **8GB VRAM** safety envelope while leaving room for the system OS, EMQX broker, and Agda type-checker, we deploy:
-* **Model:** `Phi-4` (14B)
-* **Quantization:** `Q4_K_M` (4-bit medium GGUF quantization)
-* **Resource Footprint:** should fitting within the 8 GB VRAM budget
-
-## Tools from nixpkgs — no NixOS required
-
-Installing nixpkgs in your non NixOS
-```sh
-curl -sSf -L https://lix.systems | sh -s -- install
-```
-
-All packages (including the **Agda** compiler and structural libraries) are in the `flake.nix`. Just run:
-```sh
-nix develop
-```
-
-That single shell is how the Pis are set up — the same commands work on the
-Pis and on your dev machine.
+* **System RAM:** 16 GB (CPU-only inference; the box has an AMD iGPU without
+  ROCm, so `model_gpu_layers = 0`)
+* **Model:** `unsloth/Phi-4-mini-instruct-GGUF` — `Phi-4-mini-instruct-Q4_K_M.gguf`
+  (~2.5 GB), served on `127.0.0.1:18080` as `phi-4-mini`
+* **Embeddings:** phi-4-mini hidden size **3072** -> `vector(3072)` in pgvector
 
 ## Repo layout
 
-- `.dhall/` — crew + agent definitions (Dhall; the single source of truth)
-- `worker/worker.py` — the MQTT worker each role runs
-- `sut-setup/` — TF that configures the host systems (SUT, broker, Grafana, nginx)
-- `model-setup/` — TF for the model + vector store node (Phi-4 via llama.cpp, PostgreSQL + pgvector, Qdrant)
-- `pi-setup/` — TF for the per-Pi agent/worker services
-- `hosts/`, `modules/` — optional NixOS config for the broker host
-- `flake.nix` — the `nix develop` shell (nixpkgs as flake input, containing Agda + dependencies)
-- `Makefile` — compiles the crews (`make`)
-- `resources/` — papers, `knowledge/`, `skills/` the agents use
+- `.dhall/` — crew + agent definitions (Dhall, the single source of truth)
+- `justfile` — compiles Dhall -> `build/<role>/crew.json` (run in `nix develop`)
+- `worker/run_agent.py` — the local runner each agent container executes
+- `model-setup/` — OpenTofu: PostgreSQL + pgvector + phi-4-mini as a
+  **podman-compose** stack (`/var/spool/aigents/compose/compose.yaml`, project
+  `aigents`)
+- `agent-setup/` — OpenTofu: builds the agent image (`localhost/aigents-agent`)
+  and writes the Quadlet units
+- `sut-setup/` — OpenTofu: SUT pod (nginx + Juice Shop + Grafana)
+- `skills/lean/` — Lean4 harness (`AgentHarness.lean`) + tuning CLI
+  (`Main.lean`)
+- `flake.nix` — the `nix develop` shell (lean4, dhall, tofu, just)
+- `resources/`, `knowledge/` — the sources the agents use
+
+## Quick start
+
+```sh
+nix develop -c just    # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
+```
+
+Then provision the host in order:
+
+```sh
+cd sut-setup      && tofu init && tofu apply   # SUT pod first (target of tests)
+cd model-setup    && tofu init && tofu apply   # compose stack: postgres + phi-4-mini
+cd agent-setup    && tofu init && tofu apply   # agent image + quadlet services
+```
+
+`agent-setup` assumes the model (`18080`) and postgres (`15432`) from
+`model-setup` are already listening on `127.0.0.1`.
+
+<details><summary>One-shot sanity checks</summary>
+
+```sh
+curl http://127.0.0.1:18080/health            # llama-server up, weights mmap'ed
+curl http://127.0.0.1:18080/v1/models         # reports "phi-4-mini"
+psql "postgresql://aigents@127.0.0.1:15432/aigents" -c 'select collection, count(*) from documents group by collection;'
+systemctl --user status agent-pi1-e2e.service
+podman-compose -f /var/spool/aigents/compose/compose.yaml -p aigents ps
+```
+
+</details>
+
+## Tuning
+
+Default `Tuning {queue_size=32, dedupe_cap=256, crew_timeout=3600, steps=4,
+step_cost=900}`. Per role overrides go through systemd user environment:
+
+```sh
+systemctl --user set-environment QUEUE_SIZE=64
+systemctl --user restart agent-pi1-e2e.service
+```
 
 ## Requirements
 
-- Three Raspberry Pis running **Raspberry Pi OS (Any Linux with Systemd, aarch64)**
-- The **Nix package manager** (nixpkgs provides every tool; see above —
-  NixOS is *not* required)
-- One host system (x86_64 Linux) featuring an **8GB GPU and 16GB RAM** for the SUT + MQTT broker + local model server, set up with TF (`sut-setup/`)
-- A local web server to test, reachable from every Pi (the TF setup
-  deploys Juice Shop for us): https://owasp.org
-
-## Quick local experiment
-
-```sh
-nix develop
-# For the settings of the agents for align crewai                          
-just  # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
-```
-
-## Host systems via Terraform/OpenTofu 
-
-The host machines (SUT + MQTT broker + Grafana) are **configured with
-TF**, not hand-edited. `terraform` ships in `nix develop`.
-
-```sh
-cd sut-setup
-terraform init
-terraform apply
-```
-
-This installs podman, writes the Quadlet unit files and starts a pod with
-
-- **EMQX** — the MQTT broker (1883 MQTT, 8083 WebSocket, 18083 dashboard)
-- **Juice Shop** — the system under test (OWASP project)
-- **Grafana** — metrics/dashboard
-- **nginx** — reverse proxy on :80
-
-Services bind to `0.0.0.0` by default so the Pis can reach them over the LAN;
-tune `bind_address` / `expose_public` in `sut-setup/variables.tf`. Tear down
-with `systemctl --user stop <service>` then `tofu destroy`. Details in
-`sut-setup/README.md`.
-
-## Current Model & vector store via Terraform/OpenTofu
-
-`model-setup/` provisions the model node the same way — Quadlet units, one pod,
-nothing hand-edited:
-
-- **Phi-4 (14B)** (`Q4_K_M` GGUF) served by **llama.cpp** on
-  `127.0.0.1:18080`, OpenAI-compatible `/v1`
-- **PostgreSQL + pgvector** on `:15432` (`documents`, `document_embeddings`,
-  `match_documents()`)
-- **Qdrant** on `:16333` (HTTP) / `:16334` (gRPC), API-key protected
-
-```sh
-cd model-setup
-tofu init && tofu apply
-systemctl --user start model-fetch.service   
-systemctl --user start phi-4.service         
-curl http://127.0.0.1:18080/health
-```
-
-Images, layers, weights and database files all live under `/var/spool/aigents`
-(`containers/`, `model/`, `database/`). Unlike `sut-setup`, these bind to
-`127.0.0.1` by default — set `model_api_key` before switching `bind_address` to
-`0.0.0.0`, since llama-server's CORS policy allows every origin. Details in
-`model-setup/README.md`.
-
-Note that `sut-setup/` and `model-setup/` share one Podman image store
-(`/var/spool/aigents/containers/storage`); the graphroot is configured once,
-globally, because per-unit storage overrides break pod starts.
-
-## Managing the Compute Server (GPU , models , database , Agda/Lean4 )
-
-The nixpkgs-hosted tooling lets you manage this backend architecture uniformly (or lock it down on NixOS via the optional `broker` deployment in `flake.nix`). The 4-bit quantized model and the Agda service share this node's system memory footprint seamlessly via isolated process parameters.
+- One x86_64 Linux host with **16 GB RAM**, **Nix**, **Podman** and
+  **OpenTofu** (all installed/declared by the OpenTofu modules)
+- A local web server to test; the SUT setup deploys **Juice Shop** for us
+- Internet during first `apply` (model weights ~2.5 GB, crewai image build)
 
 ## Further Notes
 
-- In the `resources/` folder are our sources we used
+- Sources used live in `resources/`.
 
 ## Disclaimer
 
-- This project is mostly written without using any kind of Generative AI
-- Only open models which are selfhosted are used in this project
+- Written mostly without generative AI; only open, self-hosted models are used.
 
 ## Contributions
 
-- Contributions are welcomed but restrictive using generative AI. There must
-  be at least a human behind the requests who needs to explain why they made
-  the change.
-
+- Welcomed, but restrictive on generative AI. A human must explain the change.

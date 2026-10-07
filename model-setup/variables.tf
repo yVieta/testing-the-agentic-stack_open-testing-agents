@@ -25,7 +25,7 @@ variable "quadlet_dir" {
 
 variable "bind_address" {
   type        = string
-  description = "Host interface the pod binds published ports on. 0.0.0.0 exposes the services to the LAN, 127.0.0.1 keeps them localhost-only."
+  description = "Host interface the compose stack binds published ports on. 0.0.0.0 exposes the services to the LAN, 127.0.0.1 keeps them localhost-only."
   default     = "127.0.0.1"
 }
 
@@ -56,31 +56,31 @@ variable "model_image" {
 
 variable "model_repo" {
   type        = string
-  description = "Hugging Face repository holding the GGUF build of Phi-4."
-  default     = "microsoft/Phi-4-GGUF"
+  description = "Hugging Face repository holding the GGUF build of Phi-4 mini."
+  default     = "unsloth/Phi-4-mini-instruct-GGUF"
 }
 
 variable "model_file" {
   type        = string
-  description = "GGUF file inside model_repo. Q4_K_M of the 14B model is ~8.5 GB and fits within the 8 GB VRAM budget."
-  default     = "Phi-4-Q4_K_M.gguf"
+  description = "GGUF file inside model_repo. Q4_K_M of the 3.8B mini model is ~2.5 GB and fits the 16 GB RAM budget comfortably."
+  default     = "Phi-4-mini-instruct-Q4_K_M.gguf"
 }
 
 variable "model_sha256" {
   type        = string
-  description = "Optional expected SHA-256 of model_file. The fetch unit verifies it when set."
+  description = "Optional expected SHA-256 of model_file. The fetch step verifies it when set."
   default     = ""
 }
 
 variable "model_alias" {
   type        = string
   description = "Model name reported by the OpenAI-compatible /v1/models endpoint."
-  default     = "phi-4"
+  default     = "phi-4-mini"
 }
 
 variable "model_context_size" {
   type        = number
-  description = "KV cache context window. Phi-4 at Q4_K_M is ~8.5 GB and is mmap'd from disk, so a small window is what keeps this host out of swap."
+  description = "KV cache context window. A smaller window keeps CPU-only inference out of swap."
   default     = 16384
 }
 
@@ -117,7 +117,7 @@ variable "model_api_key" {
 
 variable "hf_token" {
   type        = string
-  description = "Optional Hugging Face token used by the fetch unit for gated or rate limited downloads."
+  description = "Optional Hugging Face token used by the fetch step for gated or rate limited downloads."
   default     = ""
   sensitive   = true
 }
@@ -162,109 +162,10 @@ variable "postgres_password" {
 
 variable "embedding_dimensions" {
   type        = number
-  description = "Dimensionality of the embeddings stored in pgvector. Matches Phi-4's hidden size."
-  default     = 4096
+  description = "Dimensionality of the embeddings stored in pgvector. Matches phi-4-mini's hidden size (3072)."
+  default     = 3072
 }
 
-
-variable "qdrant_image" {
-  type        = string
-  description = "Qdrant server image."
-  default     = "docker.io/qdrant/qdrant:v1.15.4"
-}
-
-variable "qdrant_http_port" {
-  type        = number
-  description = "Host port published for the Qdrant REST/gRPC-web API."
-  default     = 16333
-}
-
-variable "qdrant_grpc_port" {
-  type        = number
-  description = "Host port published for the Qdrant gRPC API."
-  default     = 16334
-}
-
-variable "qdrant_api_key" {
-  type        = string
-  description = "API key required by Qdrant. Generated when empty."
-  default     = ""
-  sensitive   = true
-}
-
-variable "qdrant_max_search_threads" {
-  type        = number
-  description = "Qdrant search thread cap. 15 GB of RAM cannot afford one search thread per core."
-  default     = 4
-}
-
-
-variable "enable_mcp_server" {
-  type        = bool
-  description = "Run the MCP facade in mcp/model_mcp_server.py as a systemd user service, so the crewAI workers can call the model over MCP."
-  default     = true
-}
-
-variable "mcp_bind_address" {
-  type        = string
-  description = "Bind address for the MCP server. The crewAI workers run on separate Raspberry Pis and connect over the LAN, so this normally has to be 0.0.0.0. The server refuses to start on a non-loopback address without mcp_bearer_token."
-  default     = "0.0.0.0"
-}
-
-variable "mcp_port" {
-  type        = number
-  description = "Host port for the MCP streamable-http endpoint. Deliberately different from model_port so the raw model API and the agent-facing facade are separately reachable/securable."
-  default     = 18081
-}
-
-variable "mcp_bearer_token" {
-  type        = string
-  description = "Shared secret the MCP server requires from clients. Generated when empty. Required whenever mcp_bind_address is not loopback."
-  default     = ""
-  sensitive   = true
-}
-
-variable "mcp_allowed_hosts" {
-  type        = list(string)
-  description = "Host header values the MCP server accepts. Guards against DNS rebinding, where a browser reaches a loopback MCP server through an attacker-controlled hostname."
-  default     = ["127.0.0.1", "localhost", "[::1]"]
-}
-
-variable "mcp_allowed_origins" {
-  type        = list(string)
-  description = "Origin header values the MCP server accepts. Empty means no browser-origin check; non-browser MCP clients (crewAI) send no Origin at all, so this only matters if something drives the server from a web page."
-  default     = []
-}
-
-variable "mcp_model_timeout" {
-  type        = number
-  description = "Seconds the MCP server waits for one completion. This host runs CPU-only inference on a 30B MoE, so minutes per call is normal; too low and the tool returns errors mid-generation."
-  default     = 900
-}
-
-variable "mcp_venv_dir" {
-  type        = string
-  description = "Virtualenv for the MCP server. Kept out of the repo so the venv is not synced to the Raspberry Pis by pi-setup."
-  default     = "/var/spool/aigents/database/mcp-venv"
-}
-
-variable "mcp_python" {
-  type        = string
-  description = "Python interpreter used to build the MCP virtualenv. Must be >= 3.10."
-  default     = "python3"
-}
-
-
-variable "image_pull_policy" {
-  type        = string
-  description = "Quadlet Pull= policy. missing keeps the pinned llama.cpp build that was validated here instead of silently upgrading on every boot."
-  default     = "missing"
-
-  validation {
-    condition     = contains(["always", "missing", "newer", "never"], var.image_pull_policy)
-    error_message = "image_pull_policy must be one of always, missing, newer, never."
-  }
-}
 
 variable "install_podman" {
   type        = bool
@@ -290,7 +191,7 @@ variable "apt_command" {
 
 variable "enable_linger" {
   type        = bool
-  description = "Keep the user services running after logout so the pod survives SSH disconnects."
+  description = "Keep the user services running after logout so the stack survives SSH disconnects."
   default     = true
 }
 

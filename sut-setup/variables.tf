@@ -48,32 +48,6 @@ variable "juice_shop_port" {
   default = 3000
 }
 
-variable "mqtt_broker_image" {
-  type    = string
-  default = "docker.io/emqx/emqx:5.8.0"
-}
-
-variable "mqtt_port" {
-  type    = number
-  default = 1883
-}
-
-variable "mqtt_ws_port" {
-  type    = number
-  default = 8083
-}
-
-variable "mqtt_dashboard_port" {
-  type    = number
-  default = 18083
-}
-
-variable "mqtt_broker_host" {
-  type        = string
-  description = "Host address used by Juice Shop to reach the MQTT broker."
-  default     = "10.0.2.2"
-}
-
 variable "grafana_image" {
   type    = string
   default = "docker.io/grafana/grafana:11.5.0"

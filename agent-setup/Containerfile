@@ -1,0 +1,26 @@
+# Agent runtime: crewAI + the Lean4 harness (elan-installed toolchain) +
+# postgres client. Built by agent-setup with the repo root as build context.
+FROM docker.io/library/python:3.12-slim
+
+# build essentials + toolchain downloader
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+
+# lean4 via elan (toolchain pinned by skills/lean/lean-toolchain)
+ENV ELAN_HOME=/root/.elan
+ENV PATH="${ELAN_HOME}/bin:${PATH}"
+RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
+    | sh -s -- -y --default-toolchain leanprover/lean4:v4.23.0
+
+# crewai + postgres client
+RUN pip install --no-cache-dir \
+      "crewai[tools]>=1.15.20,<2.0.0" \
+      "psycopg[binary]>=3.2"
+
+# bake the formal harness into the image (repo stays read-only at runtime)
+COPY skills/lean /opt/harness/
+RUN cd /opt/harness && lake build
+
+# agents read crew defs + the runner from /repo; kept read-only.
+WORKDIR /repo

@@ -1,6 +1,7 @@
 # AgentHarness - Lean 4
 
-This is the Lean 4 port of the Agda formal harness. The harness is used for agent harnessing and tuning.
+Formal harness for agent harnessing and tuning (Lean 4 port of the Agda
+version in `../agda`).
 
 ## Building
 
@@ -12,10 +13,20 @@ lake build
 ## Checking
 
 After building, the module can be used:
+
 ```bash
 lake env lean -- -i AgentHarness
 ```
 
-## Usage
+## Tuning check CLI
 
-Same as the Agda version - agents propose new tuning parameters and the Lean 4 checker verifies the safety envelope.
+`Main.lean` reviews a proposed tuning parameter set:
+
+```bash
+lake env lean --run Main.lean 32 256 3600 4 900
+# -> accepted | rejected
+```
+
+Arguments: `queue_size dedupe_cap crew_timeout steps step_cost`. The agent
+worker (`worker/run_agent.py`) runs this before every crew execution and skips
+the crew when the harness rejects the tuning.

@@ -1,11 +1,8 @@
 [Unit]
-Description=Security SUT pod (nginx + EMQX + Juice Shop + Grafana)
+Description=Security SUT pod (nginx + Juice Shop + Grafana)
 
 [Pod]
 PublishPort=${bind_address}:${nginx_http_port}:80
-PublishPort=${bind_address}:${mqtt_port}:1883
-PublishPort=${bind_address}:${mqtt_ws_port}:8083
-PublishPort=${bind_address}:${mqtt_dashboard_port}:18083
 PublishPort=${bind_address}:${juice_shop_port}:3000
 PublishPort=${bind_address}:${grafana_port}:3000
 

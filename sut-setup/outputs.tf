@@ -1,7 +1,6 @@
 output "quadlet_files" {
   description = "Quadlet unit files managed by Terraform."
   value = {
-    mqtt_broker = local_file.mqtt_broker_quadlet.filename
     juice_shop  = local_file.juice_shop_quadlet.filename
     grafana     = local_file.grafana_quadlet.filename
     sut_pod     = local_file.sut_pod_quadlet.filename
@@ -10,10 +9,9 @@ output "quadlet_files" {
 }
 
 output "services" {
-  description = "Systemd user services and pod managed by during apply."
+  description = "Systemd user services and pod managed during apply."
   value = [
     "sut-pod.service",
-    "mqtt-broker.service",
     "juice-shop.service",
     "grafana.service",
     "nginx-proxy.service",
@@ -25,11 +23,7 @@ output "service_urls" {
   value = {
     nginx_proxy       = "http://localhost:${var.nginx_http_port} (default -> Juice Shop)"
     grafana_via_nginx = "curl -H 'Host: grafana.sut' http://localhost:${var.nginx_http_port}"
-    emqx_via_nginx    = "curl -H 'Host: emqx.sut' http://localhost:${var.nginx_http_port}"
     juice_shop        = "http://localhost:${var.juice_shop_port}"
-    mqtt              = "localhost:${var.mqtt_port}"
-    mqtt_websocket    = "localhost:${var.mqtt_ws_port}"
-    mqtt_dashboard    = "http://localhost:${var.mqtt_dashboard_port}"
     grafana           = "http://localhost:${var.grafana_port}"
   }
 }
@@ -38,12 +32,8 @@ locals {
   external_urls = {
     nginx_proxy       = "http://<LAN-IP>:${var.nginx_http_port} (default -> Juice Shop)"
     juice_shop        = "http://<LAN-IP>:${var.juice_shop_port}"
-    mqtt              = "<LAN-IP>:${var.mqtt_port}"
-    mqtt_websocket    = "<LAN-IP>:${var.mqtt_ws_port}"
-    mqtt_dashboard    = "http://<LAN-IP>:${var.mqtt_dashboard_port}"
     grafana           = "http://<LAN-IP>:${var.grafana_port}"
     grafana_via_nginx = "http://grafana.sut (needs /etc/hosts entry -> <LAN-IP>)"
-    emqx_via_nginx    = "http://emqx.sut (needs /etc/hosts entry -> <LAN-IP>)"
   }
 }
 

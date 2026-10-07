@@ -43,7 +43,7 @@ crews: manifest agents
       cp "{{ build_dir }}/agents/$agent.json" "$dir/agents/$agent.json"; \
       printf '%s\n' "$(echo "./{{ dhall_dir }}/Pyproject.dhall \"$role\"" | dhall-to-json --omit-empty | jq -r .)" > "$dir/pyproject.toml"; \
     done
-    @printf 'Compiled Dhall -> JSON for %d Raspberry Pi crews under %s/\n' \
+    @printf 'Compiled Dhall -> JSON for %d local agent crews under %s/\n' \
         "$(jq 'length' "{{ build_dir }}/.manifest.json")" "{{ build_dir }}"
 
 # chicken egg 

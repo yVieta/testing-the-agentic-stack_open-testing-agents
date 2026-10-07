@@ -1,0 +1,60 @@
+# Written by model-setup/terraform -> managed with podman-compose.
+# Database + AI model only; the testing agents live as local Quadlet units.
+services:
+  postgres:
+    image: ${postgres_image}
+    container_name: aigents-postgres
+    environment:
+      POSTGRES_DB: ${postgres_db}
+      POSTGRES_USER: ${postgres_user}
+      POSTGRES_PASSWORD: ${postgres_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - ${postgres_data_dir}:/var/lib/postgresql/data:Z
+      - ${initdb_dir}:/docker-entrypoint-initdb.d:ro,Z
+    ports:
+      - "${bind_address}:${postgres_port}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${postgres_user} -d ${postgres_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: always
+
+  phi4:
+    image: ${model_image}
+    container_name: aigents-phi4
+    volumes:
+      - ${model_dir}:/models:Z
+    environment:
+      LLAMA_CACHE: /models/.llama-cache
+      LLAMA_ARG_HOST: 0.0.0.0
+    command:
+%{ for arg in model_exec_args ~}
+      - "${arg}"
+%{ endfor ~}
+    ports:
+      - "${bind_address}:${model_port}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+
+  model-fetch:
+    image: ${model_image}
+    profiles: ["fetch"] # one-shot, started via `run --rm`
+    volumes:
+      - ${model_dir}:/models:Z
+      - ${scripts_dir}:/opt/aigents:ro
+    environment:
+      MODEL_REPO: ${model_repo}
+      MODEL_FILE: ${model_file}
+      MODEL_DIR: /models
+      MODEL_SHA256: ${model_sha256}
+      HF_ENDPOINT: ${hf_endpoint}
+      HF_TOKEN: ${hf_token}
+    entrypoint: ["/bin/bash", "/opt/aigents/fetch-gguf.sh"]
+    restart: "no"

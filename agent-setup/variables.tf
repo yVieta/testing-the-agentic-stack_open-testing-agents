@@ -1,0 +1,81 @@
+variable "home_dir" {
+  type        = string
+  description = "Home dir of user that runs the Podman rootless user services."
+  default     = "/home/vieta"
+}
+
+variable "spool_root" {
+  type        = string
+  description = "Base directory on the big aigents volume (container graph, model, database)."
+  default     = "/var/spool/aigents"
+}
+
+variable "repo_dir" {
+  type        = string
+  description = "Repo root mounted into the agent containers (/repo). Defaults to the checkout that contains this module."
+  default     = ""
+}
+
+variable "quadlet_dir" {
+  type        = string
+  description = "Dir where Quadlet unit files are written."
+  default     = "~/.config/containers/systemd"
+}
+
+variable "model_url" {
+  type        = string
+  description = "Base URL of the local model server (worker appends /v1)."
+  default     = "http://127.0.0.1:18080"
+}
+
+variable "model_name" {
+  type        = string
+  description = "Model name as served by llama-server --alias."
+  default     = "phi-4-mini"
+}
+
+variable "target_url" {
+  type        = string
+  description = "System under test the agents exercise."
+  default     = "http://127.0.0.1:80"
+}
+
+variable "agent_image" {
+  type        = string
+  description = "Image tag for the agent container (built from this module's Containerfile)."
+  default     = "localhost/aigents-agent"
+}
+
+variable "build_agent_image" {
+  type        = bool
+  description = "Build localhost/aigents-agent with podman during apply (pulls crewai + lean toolchain)."
+  default     = true
+}
+
+variable "credential_file" {
+  type        = string
+  description = "credentials.env written by model-setup; mounted into each agent."
+  default     = ""
+}
+
+variable "roles" {
+  type        = map(string)
+  description = "build/<role> directory -> agent name (matches .dhall/Manifest.dhall)."
+  default = {
+    pi1-e2e       = "e2e_test_agent"
+    pi2-pentester = "pentester_agent"
+    pi3-manager   = "test_manager_agent"
+  }
+}
+
+variable "run_interval" {
+  type        = number
+  description = "Seconds the worker idles between crew runs."
+  default     = 900
+}
+
+variable "enable_linger" {
+  type        = bool
+  description = "Keep user services running after logout."
+  default     = true
+}

@@ -23,13 +23,11 @@
           elan
           lean4
           just
-          go-task
           python3
           python3Packages.pip
           dhall # .dhall/ sources
           dhall-json # dhall-to-json / json-to-dhall (used by `just`)
           jq
-          mosquitto
           pipenv
           opentofu
         ];
