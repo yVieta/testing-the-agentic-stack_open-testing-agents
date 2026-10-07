@@ -62,9 +62,9 @@ variable "roles" {
   type        = map(string)
   description = "build/<role> directory -> agent name (matches .dhall/Manifest.dhall)."
   default = {
-    pi1-e2e       = "e2e_test_agent"
-    pi2-pentester = "pentester_agent"
-    pi3-manager   = "test_manager_agent"
+    e2e       = "e2e_test_agent"
+    pentester = "pentester_agent"
+    manager   = "test_manager_agent"
   }
 }
 

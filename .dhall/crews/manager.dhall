@@ -1,15 +1,15 @@
--- Crew definition for role 3: runs the test manager agent.
+-- Crew definition for the test manager: reviews and writes the final report.
 --
 -- The pentester results are written to previous_output.md by the worker
 -- before this crew runs.
 --
 -- Compile to JSON with:
---   dhall-to-json --omit-empty --file .dhall/crews/pi3_manager.dhall \
---     --output build/pi3-manager/crew.json
+--   dhall-to-json --omit-empty --file .dhall/crews/manager.dhall \
+--     --output build/manager/crew.json
 
 let Types = ../Types.dhall
 
-in  { name = "pi3-manager"
+in  { name = "manager"
     , agents = [ "test_manager_agent" ]
     , tasks =
         [ { name = "review_and_final_report_task"

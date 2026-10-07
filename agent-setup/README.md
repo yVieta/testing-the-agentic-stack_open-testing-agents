@@ -17,8 +17,8 @@ postgres (`15432`) are already up on `127.0.0.1`.
 | `localhost/aigents-agent` image | python 3.12-slim + `crewai[tools]` + `psycopg[binary]` + lean4 via **elan**; `skills/lean/` is baked into `/opt/harness` and built with `lake build` |
 | `agent-<role>.container` per role | Quadlet: `Network=host`, repo mounted read-only at `/repo`, `credentials.env` at `/run/secrets/credentials.env`, runs `worker/run_agent.py` |
 
-Roles come from `.dhall/Manifest.dhall` (default): `pi1-e2e`, `pi2-pentester`,
-`pi3-manager` → `build/<role>/` crews.
+Roles come from `.dhall/Manifest.dhall` (default): `e2e`, `pentester`,
+`manager` → `build/<role>/` crews.
 
 ## Usage
 
@@ -55,7 +55,7 @@ Rejected tunings are logged to postgres instead. Override per role with:
 
 ```sh
 systemctl --user set-environment QUEUE_SIZE=64
-systemctl --user restart agent-pi1-e2e.service
+systemctl --user restart agent-e2e.service
 ```
 
 ## Layout

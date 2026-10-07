@@ -3,8 +3,8 @@
 -- The pyproject.toml heredoc that used to live inside compile.sh is now a
 -- Dhall function. The Makefile materializes it as raw text with:
 --
---   echo '.dhall/Pyproject.dhall "pi1-e2e"' \
---     | dhall-to-json --omit-empty | jq -r . > build/pi1-e2e/pyproject.toml
+--   echo '.dhall/Pyproject.dhall "e2e"' \
+--     | dhall-to-json --omit-empty | jq -r . > build/e2e/pyproject.toml
 
 let RenderPyproject = ∀(name : Text) → Text
 
@@ -12,7 +12,7 @@ in  ( λ(name : Text) → ''
     [project]
     name = "${name}"
     version = "0.1.0"
-    description = "crewAI worker for ${name} (one agent per Raspberry Pi)"
+    description = "crewAI worker for ${name}"
     requires-python = ">=3.10,<3.14"
 
     [build-system]

@@ -57,11 +57,11 @@ reports land in the `documents` table in Postgres.
 
 ## Architecture
 
-| Role            | Crew dir            | Work                              | Output            |
-|-----------------|---------------------|-----------------------------------|-------------------|
-| e2e engineer    | `build/pi1-e2e`     | playwright tests against the SUT  | `previous_output.md` |
-| pentester       | `build/pi2-pentester` | nmap/nikto/sqlmap security scans | `previous_output.md` |
-| test manager    | `build/pi3-manager` | review + final report             | `report.md`       |
+| Role            | Crew dir        | Work                              | Output            |
+|-----------------|-----------------|-----------------------------------|-------------------|
+| e2e engineer    | `build/e2e`     | playwright tests against the SUT  | `previous_output.md` |
+| pentester       | `build/pentester` | nmap/nikto/sqlmap security scans | `previous_output.md` |
+| test manager    | `build/manager` | review + final report             | `report.md`       |
 
 Every cycle the worker asks the **Lean4 harness** to review the current tuning
 parameters (`skills/lean/Main.lean` — queue_size, dedupe_cap, crew_timeout,
@@ -102,7 +102,7 @@ steps, step_cost). Only a verdict of `accepted` lets the crew run.
 ## Quick start
 
 ```sh
-nix develop -c just    # .dhall -> build/pi1-e2e, pi2-pentester, pi3-manager
+nix develop -c just    # .dhall -> build/e2e, pentester, manager
 ```
 
 Then provision the host in order:
@@ -122,7 +122,7 @@ cd agent-setup    && tofu init && tofu apply   # agent image + quadlet services
 curl http://127.0.0.1:18080/health            # llama-server up, weights mmap'ed
 curl http://127.0.0.1:18080/v1/models         # reports "phi-4-mini"
 psql "postgresql://aigents@127.0.0.1:15432/aigents" -c 'select collection, count(*) from documents group by collection;'
-systemctl --user status agent-pi1-e2e.service
+systemctl --user status agent-e2e.service
 podman-compose -f /var/spool/aigents/compose/compose.yaml -p aigents ps
 ```
 
@@ -135,7 +135,7 @@ step_cost=900}`. Per role overrides go through systemd user environment:
 
 ```sh
 systemctl --user set-environment QUEUE_SIZE=64
-systemctl --user restart agent-pi1-e2e.service
+systemctl --user restart agent-e2e.service
 ```
 
 ## Requirements

@@ -1,10 +1,4 @@
--- Manifest.dhall: the per-PI crew build plan.
---
--- This is the role table that used to live as bash literals inside
--- compile.sh, now expressed as typed Dhall data instead. The Makefile
--- consumes it as JSON:
---
---   dhall-to-json --file .dhall/Manifest.dhall --output build/.manifest.json
+-- Manifest.dhall: the crew build plan.
 --
 -- Each entry maps a role directory under build/ to its agent and crew
 -- Dhall sources under .dhall/:
@@ -15,7 +9,7 @@
 
 let Role = { role : Text, agent : Text, crew : Text }
 
-in  [ { role = "pi1-e2e", agent = "e2e_test_agent", crew = "crews/pi1_e2e" }
-    , { role = "pi2-pentester", agent = "pentester_agent", crew = "crews/pi2_pentester" }
-    , { role = "pi3-manager", agent = "test_manager_agent", crew = "crews/pi3_manager" }
+in  [ { role = "e2e", agent = "e2e_test_agent", crew = "crews/e2e" }
+    , { role = "pentester", agent = "pentester_agent", crew = "crews/pentester" }
+    , { role = "manager", agent = "test_manager_agent", crew = "crews/manager" }
     ] : List Role

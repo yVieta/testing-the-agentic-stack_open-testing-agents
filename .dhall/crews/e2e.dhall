@@ -1,12 +1,12 @@
--- Crew definition for PI 1: runs the e2e test engineer agent.
+-- Crew definition for the e2e engineer: runs the e2e test engineer agent.
 --
 -- Compile to JSON with:
---   dhall-to-json --omit-empty --file .dhall/crews/pi1_e2e.dhall \
---     --output build/pi1-e2e/crew.json
+--   dhall-to-json --omit-empty --file .dhall/crews/e2e.dhall \
+--     --output build/e2e/crew.json
 
 let Types = ../Types.dhall
 
-in  { name = "pi1-e2e"
+in  { name = "e2e"
     , agents = [ "e2e_test_agent" ]
     , tasks =
         [ { name = "write_code_in_python_task"
