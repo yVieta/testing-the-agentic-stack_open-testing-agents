@@ -9,7 +9,8 @@ host and is declared in files, never hand-edited.
 Tooling comes from the **nixpkgs** package set via the **Nix package manager**
 (no NixOS required). Host services are provisioned with **OpenTofu**:
 `model-setup/` renders a **podman-compose** stack for the database and AI model,
-and `agent-setup/` renders the agent Quadlet units.
+`sut-setup/` deploys a rootless SUT pod (nginx + Juice Shop + Grafana), and
+`agent-setup/` renders the agent Quadlet units.
 
 ```mermaid
 graph TD
@@ -82,77 +83,3 @@ steps, step_cost). Only a verdict of `accepted` lets the crew run.
 * **Model:** `unsloth/Phi-4-mini-instruct-GGUF` — `Phi-4-mini-instruct-Q4_K_M.gguf`
   (~2.5 GB), served on `127.0.0.1:18080` as `phi-4-mini`
 * **Embeddings:** phi-4-mini hidden size **3072** -> `vector(3072)` in pgvector
-
-## Repo layout
-
-- `.dhall/` — crew + agent definitions (Dhall, the single source of truth)
-- `justfile` — compiles Dhall -> `build/<role>/crew.json` (run in `nix develop`)
-- `worker/run_agent.py` — the local runner each agent container executes
-- `model-setup/` — OpenTofu: PostgreSQL + pgvector + phi-4-mini as a
-  **podman-compose** stack (`/var/spool/aigents/compose/compose.yaml`, project
-  `aigents`)
-- `agent-setup/` — OpenTofu: builds the agent image (`localhost/aigents-agent`)
-  and writes the Quadlet units
-- `sut-setup/` — OpenTofu: SUT pod (nginx + Juice Shop + Grafana)
-- `skills/lean/` — Lean4 harness (`AgentHarness.lean`) + tuning CLI
-  (`Main.lean`)
-- `flake.nix` — the `nix develop` shell (lean4, dhall, tofu, just)
-- `resources/`, `knowledge/` — the sources the agents use
-
-## Quick start
-
-```sh
-nix develop -c just    # .dhall -> build/e2e, pentester, manager
-```
-
-Then provision the host in order:
-
-```sh
-cd sut-setup      && tofu init && tofu apply   # SUT pod first (target of tests)
-cd model-setup    && tofu init && tofu apply   # compose stack: postgres + phi-4-mini
-cd agent-setup    && tofu init && tofu apply   # agent image + quadlet services
-```
-
-`agent-setup` assumes the model (`18080`) and postgres (`15432`) from
-`model-setup` are already listening on `127.0.0.1`.
-
-<details><summary>One-shot sanity checks</summary>
-
-```sh
-curl http://127.0.0.1:18080/health            # llama-server up, weights mmap'ed
-curl http://127.0.0.1:18080/v1/models         # reports "phi-4-mini"
-psql "postgresql://aigents@127.0.0.1:15432/aigents" -c 'select collection, count(*) from documents group by collection;'
-systemctl --user status agent-e2e.service
-podman-compose -f /var/spool/aigents/compose/compose.yaml -p aigents ps
-```
-
-</details>
-
-## Tuning
-
-Default `Tuning {queue_size=32, dedupe_cap=256, crew_timeout=3600, steps=4,
-step_cost=900}`. Per role overrides go through systemd user environment:
-
-```sh
-systemctl --user set-environment QUEUE_SIZE=64
-systemctl --user restart agent-e2e.service
-```
-
-## Requirements
-
-- One x86_64 Linux host with **16 GB RAM**, **Nix**, **Podman** and
-  **OpenTofu** (all installed/declared by the OpenTofu modules)
-- A local web server to test; the SUT setup deploys **Juice Shop** for us
-- Internet during first `apply` (model weights ~2.5 GB, crewai image build)
-
-## Further Notes
-
-- Sources used live in `resources/`.
-
-## Disclaimer
-
-- Written mostly without generative AI; only open, self-hosted models are used.
-
-## Contributions
-
-- Welcomed, but restrictive on generative AI. A human must explain the change.
