@@ -12,16 +12,11 @@ Used by worker/run_agent.py to validate a tuning proposal before it is
 applied (the safety obligations live in AgentHarness.lean).
 -/
 
--- Convert a native Lean Nat to the harness's own Nat (iterated successor).
-def harnessNat : _root_.Nat → AgentHarness.Nat
-  | 0 => AgentHarness.Nat.zero
-  | _root_.Nat.succ n => AgentHarness.Nat.succ (harnessNat n)
-
--- Parse a CLI arg as a harness Nat; 0 on garbage input.
-def toTuningNat (s : String) : AgentHarness.Nat :=
+-- Parse a CLI arg as a Nat; 0 on garbage input.
+def toTuningNat (s : String) : Nat :=
   match s.toNat? with
-  | some n => harnessNat n
-  | none => AgentHarness.Nat.zero
+  | some n => n
+  | none   => 0
 
 def main (args : List String) : IO Unit :=
   match args with

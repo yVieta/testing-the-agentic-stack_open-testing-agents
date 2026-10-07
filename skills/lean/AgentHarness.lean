@@ -1,123 +1,21 @@
-/-!
+/-
 # AgentHarness.lean - the formal harness the crew is tuned against.
 
-This is the Lean 4 port of AgentHarness.agda. The harness defines:
-- Action boundaries of agents, tool pre-conditions, and worker state transitions (sections 1-3)
-- Tuning parameters and safety envelope (sections 4-5)
-- Verification feedback mechanism (section 6)
+Lean 4 port of AgentHarness.agda. Built on the standard library (no axioms).
+- section 1: the crew roles and the chain between them (no MQTT; local files)
+- section 2: action boundaries + tool pre-conditions
+- section 3: worker state transitions
+- section 4: tuning parameters + safety envelope (WellTuned)
+- section 5: the tuning loop (safe widening/more-step lemmas)
+- section 6: verification feedback (review : Tuning → Verdict)
 
-The harness is used for both:
-1. **Harnessing** - the action boundaries, pre-conditions of tools, and state
-   transitions are *types*; actions not granted cannot be constructed.
-2. **Tuning** - the knobs of worker/worker.py are in the `Tuning` structure.
-   Agents propose new values; the Lean 4 service checks that the safety proofs
-   hold for the proposed parameters.
-
-The same comments from the Agda version explain each obligation.
+Worker usage (worker/run_agent.py):
+    lake env lean --run Main.lean queue_size dedupe_cap crew_timeout steps step_cost
 -/
 
 namespace AgentHarness
 
-/-! 0. Toolbox: order, decidability, monotonicity -/
-
-/-- Empty type -/
-inductive Empty : Type where
-
-/-- Ex falso quodlibet -/
-def Empty.elim {A : Type} : Empty → A
-  | _ => by contradiction
-
-/-- Natural numbers -/
-inductive Nat : Type where
-  | zero : Nat
-  | succ : Nat → Nat
-
-instance : OfNat Nat 0 := ⟨Nat.zero⟩
-instance : OfNat Nat n.succ := ⟨Nat.succ (OfNat.ofNat n)⟩
-
-/-- Addition -/
-def Nat.add : Nat → Nat → Nat
-  | Nat.zero, m => m
-  | Nat.succ n, m => Nat.succ (Nat.add n m)
-
-instance : Add Nat := ⟨Nat.add⟩
-
-/-- Multiplication -/
-def Nat.mul : Nat → Nat → Nat
-  | Nat.zero, _ => Nat.zero
-  | Nat.succ n, k => k + Nat.mul n k
-
-instance : Mul Nat := ⟨Nat.mul⟩
-
-/-- Less than or equal -/
-inductive Nat.le : Nat → Nat → Prop where
-  | zero : ∀ n, Nat.le 0 n
-  | succ : ∀ m n, Nat.le m n → Nat.le (Nat.succ m) (Nat.succ n)
-
-/-- Sequent notation as in Agda -/
-abbrev «⊢» (m n : Nat) := Nat.le m n
-
-/-- Logical negation -/
-def Not (P : Prop) := P → Empty
-
-/-- Decidable type -/
-inductive Dec (P : Prop) : Type where
-  | yes : P → Dec P
-  | no  : Not P → Dec P
-
-/-- Decision procedure for ≤ -/
-def Nat.compare : ∀ m n : Nat, Dec (Nat.le m n)
-  | 0, n => Dec.yes (Nat.le.zero n)
-  | Nat.succ _, 0 => Dec.no fun h => by
-      cases h
-  | Nat.succ m, Nat.succ n =>
-    match Nat.compare m n with
-    | Dec.yes p => Dec.yes (Nat.le.succ m n p)
-    | Dec.no np => Dec.no fun h => by
-        cases h with
-        | succ _ _ h' => exact np h'
-
-/-- Reflexivity -/
-theorem Nat.le_refl : ∀ m, Nat.le m m
-  | 0 => Nat.le.zero 0
-  | Nat.succ m => Nat.le.succ m m (Nat.le_refl m)
-
-/-- Suc property -/
-theorem Nat.le_succ : ∀ m n, Nat.le m n → Nat.le m (Nat.succ n)
-  | 0, n, _ => Nat.le.zero (Nat.succ n)
-  | Nat.succ m, Nat.succ n, Nat.le.succ _ _ h => Nat.le.succ m (Nat.succ n) (Nat.le_succ m n h)
-
-/-- Transitivity -/
-theorem Nat.le_trans : ∀ {m n o}, Nat.le m n → Nat.le n o → Nat.le m o
-  | _, _, _, Nat.le.zero _, _ => Nat.le.zero _
-  | _, _, _, Nat.le.succ _ _ h1, Nat.le.succ _ _ h2 => Nat.le.succ _ _ (Nat.le_trans h1 h2)
-
-/-- Monotonicity of + on left -/
-theorem Nat.le_add_left : ∀ k m, Nat.le m (k + m)
-  | k, 0 => Nat.le.zero (k + 0)
-  | k, Nat.succ m => Nat.le.succ m (k + Nat.succ m) (Nat.le_add_left k m)
-
-/-- Monotonicity of + on right -/
-theorem Nat.le_add_right : ∀ m k, Nat.le m (m + k)
-  | 0, k => Nat.le.zero k
-  | Nat.succ m, k => Nat.le.succ m (Nat.succ m + k) (Nat.le_add_right m k)
-
-/-- Mono on + left -/
-theorem Nat.add_mono_left : ∀ {m n}, Nat.le m n → ∀ k, Nat.le (m + k) (n + k)
-  | _, _, Nat.le.zero n, k => Nat.le_add_left n k
-  | _, _, Nat.le.succ m n h, k => Nat.le.succ (m + k) (n + k) (Nat.add_mono_left h k)
-
-/-- Mono on + right -/
-theorem Nat.add_mono_right : ∀ {m n}, Nat.le m n → ∀ k, Nat.le (k + m) (k + n)
-  | _, _, Nat.le.zero n, k => Nat.le_add_right k n
-  | _, _, Nat.le.succ m n h, k => Nat.le.succ (k + m) (k + n) (Nat.add_mono_right h k)
-
-/-- Mono on * left -/
-theorem Nat.mul_mono_left : ∀ {m n}, Nat.le m n → ∀ k, Nat.le (m * k) (n * k)
-  | _, _, Nat.le.zero n, k => Nat.le.zero (n * k)
-  | _, _, Nat.le.succ m n h, k => Nat.add_mono_right h k
-
-/-! 1. The crew: roles, MQTT topics, and the chain between them -/
+/-! 1. The crew: roles, topics, and the chain between them -/
 
 inductive Role : Type where
   | e2e       : Role  -- pi1-e2e
@@ -145,10 +43,10 @@ def publish : Role → Topic
   | Role.pentester => Topic.crew_manager_input
   | Role.manager   => Topic.crew_final
 
-structure Connected (from to : Role) : Prop where
-  wire : publish from = listen to
+structure Connected (src dst : Role) : Prop where
+  wire : publish src = listen dst
 
-/-- Wire connections -/
+/-- The chain is wired edge-to-edge. -/
 def e2e_to_pentester : Connected Role.e2e Role.pentester :=
   ⟨rfl⟩
 
@@ -158,14 +56,14 @@ def pentester_to_manager : Connected Role.pentester Role.manager :=
 def manager_to_monitor : publish Role.manager = Topic.crew_final :=
   rfl
 
-/-- Only e2e starts -/
+/-- Only e2e starts. -/
 theorem only_e2e_starts : ∀ r, listen r = Topic.crew_start → r = Role.e2e
   | Role.e2e, _ => rfl
   | Role.pentester, h => by cases h
   | Role.manager, h => by cases h
 
-/-- No self certification -/
-theorem no_self_certification : ∀ r, publish r = Topic.crew_proof_verify → Empty
+/-- No role publishes onto the proof-verify topic (no self certification). -/
+theorem no_self_certification : ∀ r, publish r = Topic.crew_proof_verify → False
   | Role.e2e, h => by cases h
   | Role.pentester, h => by cases h
   | Role.manager, h => by cases h
@@ -193,7 +91,7 @@ def permitted : Role → Tool → Prop
   | Role.manager, Tool.playwright => False
   | Role.manager, Tool.scanner    => False
 
-/-- Scan tool per role -/
+/-- The scan-grade tool per role. -/
 def scan_tool : Role → Tool
   | Role.e2e       => Tool.playwright
   | Role.pentester => Tool.scanner
@@ -204,11 +102,11 @@ theorem only_e2e_playwright : ∀ r, scan_tool r = Tool.playwright → r = Role.
   | Role.pentester, h => by cases h
   | Role.manager, h => by cases h
 
-theorem e2e_cannot_scan : Not (permitted Role.e2e Tool.scanner)
-  | h => h
+theorem e2e_cannot_scan : ¬ permitted Role.e2e Tool.scanner := by
+  simp [permitted]
 
-theorem manager_cannot_scan : Not (permitted Role.manager Tool.scanner)
-  | h => h
+theorem manager_cannot_scan : ¬ permitted Role.manager Tool.scanner := by
+  simp [permitted]
 
 inductive Artefact : Type where
   | findings : Artefact
@@ -227,6 +125,7 @@ theorem report_owner : ∀ r, owns r Artefact.report → r = Role.manager
   | Role.pentester, h => False.elim h
   | Role.manager, _ => rfl
 
+/-- Handover between roles goes through the shared file previous_output.md. -/
 inductive Handover : Type where
   | kick_off       : Handover
   | from_e2e       : Handover
@@ -250,10 +149,10 @@ def readable : Role → Handover → Prop
 
 theorem reads_previous : ∀ r, readable r (handover_of r) → True
   | Role.e2e, h => False.elim h
-  | Role.pentester, _ => trivial
-  | Role.manager, _ => trivial
+  | Role.pentester, _ => True.intro
+  | Role.manager, _ => True.intro
 
-theorem e2e_reads_nothing : ∀ h, Not (readable Role.e2e h)
+theorem e2e_reads_nothing : ∀ h, ¬ readable Role.e2e h
   | Handover.kick_off, h => h
   | Handover.from_e2e, h => h
   | Handover.from_pentester, h => h
@@ -291,11 +190,13 @@ def may_publish : Phase → Prop
   | Phase.done    => False
   | Phase.failed  => False
 
-theorem no_publish_without_run : may_publish (transition Phase.idle Event.published) → Empty
+theorem no_publish_without_run : may_publish (transition Phase.idle Event.published) → False
   | h => h
 
-theorem no_zombie : ∀ p e, p = Phase.failed → may_publish (transition p e) → Empty
-  | Phase.failed, _, rfl, h => h
+theorem no_zombie : ∀ p e, p = Phase.failed → may_publish (transition p e) → False
+  | _, Event.kickoff, rfl, h => h
+  | _, Event.published, rfl, h => h
+  | _, Event.crashed, rfl, h => h
 
 theorem done_is_final : ∀ e, transition Phase.done e = Phase.done
   | Event.kickoff   => rfl
@@ -310,7 +211,8 @@ theorem failed_is_final : ∀ e, transition Phase.failed e = Phase.failed
 theorem never_failed : transition (transition (transition Phase.idle Event.kickoff) Event.published) Event.published = Phase.running :=
   rfl
 
-theorem crashed_cannot_publish : may_publish (transition (transition Phase.idle Event.kickoff) Event.crashed) → Empty
+/-- Crashed workers cannot publish. -/
+theorem crashed_cannot_publish : may_publish (transition (transition Phase.idle Event.kickoff) Event.crashed) → False
   | h => h
 
 /-! 4. Tuning -/
@@ -318,7 +220,7 @@ theorem crashed_cannot_publish : may_publish (transition (transition Phase.idle 
 structure Tuning : Type where
   queue_size   : Nat  -- QUEUE
   dedupe_cap   : Nat  -- DEDUPE_CAP
-  crew_timeout : Nat  -- crew_timeout
+  crew_timeout : Nat  -- crew_timeout (seconds)
   steps        : Nat  -- steps per crew run
   step_cost    : Nat  -- seconds per step
   deriving Repr
@@ -326,80 +228,95 @@ structure Tuning : Type where
 def defaults : Tuning :=
   { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 4, step_cost := 900 }
 
+/-- A tuning is safe when the dedupe window is big enough for the queue and
+the crew budget fits inside the timeout. -/
 structure WellTuned (t : Tuning) : Prop where
-  dedupe_window : Nat.le t.queue_size t.dedupe_cap
-  crew_budget   : Nat.le (t.steps * t.step_cost) t.crew_timeout
+  dedupe_window : t.queue_size ≤ t.dedupe_cap
+  crew_budget   : t.steps * t.step_cost ≤ t.crew_timeout
 
-def check (t : Tuning) : Dec (WellTuned t) :=
-  match Nat.compare t.queue_size t.dedupe_cap with
-  | Dec.no dw => Dec.no fun h => dw h.dedupe_window
-  | Dec.yes dw =>
-    match Nat.compare (t.steps * t.step_cost) t.crew_timeout with
-    | Dec.no bo => Dec.no fun h => bo h.crew_budget
-    | Dec.yes bo => Dec.yes ⟨dw, bo⟩
+-- Decidable because both obligations are decidable Nat comparisons.
+instance (t : Tuning) : Decidable (WellTuned t) :=
+  match Nat.decLe t.queue_size t.dedupe_cap,
+        Nat.decLe (t.steps * t.step_cost) t.crew_timeout with
+  | isTrue h1, isTrue h2 => isTrue ⟨h1, h2⟩
+  | isFalse h1, _ => isFalse fun w => h1 w.dedupe_window
+  | _, isFalse h2 => isFalse fun w => h2 w.crew_budget
 
-theorem defaults_tuned : WellTuned defaults :=
-  ⟨Nat.le.zero 256, Nat.le_refl (defaults.steps * defaults.step_cost)⟩
+theorem defaults_tuned : WellTuned defaults := by
+  constructor
+  · native_decide
+  · native_decide
 
 /-! 5. Tuning loop -/
 
-def widen (n : Nat) : Tuning :=
+-- Safe operations the worker may apply on an accepted tuning.
+def widen_queue (n : Nat) : Tuning :=
   { queue_size := n, dedupe_cap := n + 256, crew_timeout := 3600, steps := 4, step_cost := 900 }
 
-theorem widen_sound (n : Nat) : WellTuned (widen n) :=
-  ⟨Nat.le_add_right n 256, Nat.le_refl (widen n).steps⟩
+theorem widen_queue_sound (n : Nat) : WellTuned (widen_queue n) := by
+  constructor
+  · exact Nat.le_add_right n 256
+  · change 4 * 900 ≤ 3600
+    native_decide
 
-def more_time (t : Tuning) : Tuning :=
-  { queue_size := t.queue_size, dedupe_cap := t.dedupe_cap, crew_timeout := Nat.succ t.crew_timeout, steps := t.steps, step_cost := t.step_cost }
+def give_more_time (t : Tuning) : Tuning :=
+  { t with crew_timeout := t.crew_timeout + 1 }
 
-theorem more_time_sound {t : Tuning} (h : WellTuned t) : WellTuned (more_time t) :=
-  ⟨h.dedupe_window, Nat.le_succ t.crew_timeout h.crew_budget⟩
+theorem give_more_time_sound {t : Tuning} (h : WellTuned t) : WellTuned (give_more_time t) := by
+  constructor
+  · exact h.dedupe_window
+  · rw [give_more_time]
+    rw [← Nat.succ_eq_add_one t.crew_timeout]
+    exact Nat.le_trans h.crew_budget (Nat.le_succ t.crew_timeout)
 
 def raise_steps (t : Tuning) (o : Nat) : Tuning :=
-  { queue_size := t.queue_size, dedupe_cap := t.dedupe_cap, crew_timeout := o, steps := Nat.succ t.steps, step_cost := t.step_cost }
+  { queue_size := t.queue_size, dedupe_cap := t.dedupe_cap, crew_timeout := o, steps := t.steps + 1, step_cost := t.step_cost }
 
-theorem more_steps_needs_time {t : Tuning} {o : Nat} (h : Nat.le (Nat.succ t.steps * t.step_cost) o) : Nat.le (t.steps * t.step_cost) o :=
-  Nat.le_trans (Nat.mul_mono_left (Nat.le_refl (Nat.succ t.steps)) t.step_cost) h
+theorem more_steps_needs_more_time {t : Tuning} {o : Nat}
+    (h : (t.steps + 1) * t.step_cost ≤ o) : t.steps * t.step_cost ≤ o := by
+  rw [← Nat.succ_eq_add_one t.steps] at h
+  exact Nat.le_trans (Nat.mul_le_mul_right t.step_cost (Nat.le_succ t.steps)) h
 
-theorem more_cost_needs_time {t : Tuning} {o : Nat} (h : Nat.le (t.steps * Nat.succ t.step_cost) o) : Nat.le (t.steps * t.step_cost) o :=
-  Nat.le_trans (Nat.add_mono_right (Nat.le_refl t.step_cost) t.steps) h
+theorem more_cost_needs_more_time {t : Tuning} {o : Nat}
+    (h : t.steps * (t.step_cost + 1) ≤ o) : t.steps * t.step_cost ≤ o := by
+  rw [← Nat.succ_eq_add_one t.step_cost] at h
+  exact Nat.le_trans (Nat.mul_le_mul_left t.steps (Nat.le_succ t.step_cost)) h
 
+/-- An overspending tuning is rejected. -/
 def greedy : Tuning :=
   { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 8, step_cost := 900 }
 
-theorem greedy_rejected : Not (WellTuned greedy)
-  | ⟨_, bo⟩ =>
-    match Nat.compare (greedy.steps * greedy.step_cost) greedy.crew_timeout with
-    | Dec.yes p => p bo
-    | Dec.no np => np bo
+theorem greedy_rejected : ¬ WellTuned greedy := by
+  native_decide
 
+/-- A balanced proposal is accepted. -/
 def proposal : Tuning :=
-  { queue_size := 32, dedupe_cap := 512, crew_timeout := 7200, steps := 6, step_cost := 1200 }
+  { queue_size := 32, dedupe_cap := 512, crew_timeout := 7200, steps := 4, step_cost := 1800 }
 
-theorem proposal_accepted : WellTuned proposal :=
-  ⟨Nat.le.zero 512, Nat.le_refl (proposal.steps * proposal.step_cost)⟩
+theorem proposal_accepted : WellTuned proposal := by
+  constructor
+  · native_decide
+  · native_decide
 
 /-! 6. Feedback -/
 
 inductive Verdict : Type where
   | accepted : Verdict
   | rejected : Verdict
-  deriving Repr
+  deriving Repr, DecidableEq
 
 def review (t : Tuning) : Verdict :=
-  match check t with
-  | Dec.yes _ => Verdict.accepted
-  | Dec.no  _ => Verdict.rejected
+  if (WellTuned t) then Verdict.accepted else Verdict.rejected
 
 structure Feedback : Type where
   verdict : Verdict
   params  : Tuning
   deriving Repr
 
-theorem defaults_verdict : review defaults = Verdict.accepted :=
-  rfl
+theorem defaults_verdict : review defaults = Verdict.accepted := by
+  native_decide
 
-theorem greedy_verdict : review greedy = Verdict.rejected :=
-  rfl
+theorem greedy_verdict : review greedy = Verdict.rejected := by
+  native_decide
 
 end AgentHarness

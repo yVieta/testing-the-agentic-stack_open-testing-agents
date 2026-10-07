@@ -1,0 +1,7 @@
+# Local OpenTofu state/plugins — never commit.
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+plan.tfplan
+.terraform/
+.terraform.lock.hcl
