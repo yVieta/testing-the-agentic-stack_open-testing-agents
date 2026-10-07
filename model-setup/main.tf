@@ -22,10 +22,10 @@ locals {
   initdb_dir        = "${local.module_dir}/postgres/rendered"
   scripts_dir       = "${local.module_dir}/scripts"
 
-  compose_file      = "${local.compose_dir}/compose.yaml"
-  model_file_path   = "${local.model_dir}/${var.model_file}"
-  credential_file   = "${local.secret_dir}/credentials.env"
-  model_port        = var.model_port
+  compose_file       = "${local.compose_dir}/compose.yaml"
+  model_file_path    = "${local.model_dir}/${var.model_file}"
+  credential_file    = "${local.secret_dir}/credentials.env"
+  model_port         = var.model_port
   model_bind_address = "0.0.0.0"
 
   # llama.cpp server args. Rendered as the compose `command`, flags come from
@@ -235,11 +235,12 @@ resource "null_resource" "start_compose" {
   ]
 
   triggers = {
-    compose      = local_file.compose_yaml.content
-    fetch_script = filesha256("${local.scripts_dir}/fetch-gguf.sh")
-    schema       = local_file.initdb_schema.content
-    credentials  = sha256(local_sensitive_file.credentials_env.content)
-    ports        = join(",", local.published_ports)
+    compose       = local_file.compose_yaml.content
+    fetch_script  = filesha256("${local.scripts_dir}/fetch-gguf.sh")
+    schema        = local_file.initdb_schema.content
+    credentials   = sha256(local_sensitive_file.credentials_env.content)
+    ports         = join(",", local.published_ports)
+    service_state = var.service_state
   }
 
   provisioner "local-exec" {
@@ -247,6 +248,11 @@ resource "null_resource" "start_compose" {
       set -eu
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
       user=$(id -un)
+      if [ "${var.service_state}" = "stopped" ]; then
+        # stop model + database; volumes and GGUF weights are kept
+        podman-compose -p aigents -f "${local.compose_file}" stop || true
+        exit 0
+      fi
       if [ "${var.enable_linger}" = "true" ]; then
         loginctl enable-linger "$user" || true
       fi

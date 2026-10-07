@@ -42,6 +42,16 @@ colliding. nginx routes `Host: grafana.sut` to the Grafana upstream.
 - `quadlet/` — Quadlet templates (`*.container.tftpl`, `sut.pod.tftpl`)
 - `nginx/default.conf.tftpl` — nginx virtual-hosts template
 
+## Start / Stop
+
+The desired service state is controlled by the `service_state` variable. Stop
+the pod without destroying anything, and start it again later:
+
+```bash
+tofu apply -var service_state=stopped   # stop quadlet user services
+tofu apply -var service_state=running    # start them again (default)
+```
+
 ## Teardown
 
 ```bash

@@ -79,3 +79,14 @@ variable "enable_linger" {
   description = "Keep user services running after logout."
   default     = true
 }
+
+variable "service_state" {
+  type        = string
+  description = "Desired state of the agent quadlet services: 'running' enables+starts them, 'stopped' disables+stops them. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  default     = "running"
+
+  validation {
+    condition     = contains(["running", "stopped"], var.service_state)
+    error_message = "service_state must be either \"running\" or \"stopped\"."
+  }
+}

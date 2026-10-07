@@ -200,3 +200,14 @@ variable "skip_network_online_wait" {
   description = "Neutralise podman's podman-user-wait-network-online.service helper. Podman gates every Quadlet unit on it and it polls `systemctl is-active network-online.target` until that unit activates, with TimeoutStartSec=90s. On hosts where the system network-online.target never reaches active, every container start stalls for the full 90s and then fails the helper - even when the network itself is up (NetworkManager healthy, nm-online returning instantly). Disable if your host's network-online.target does activate."
   default     = true
 }
+
+variable "service_state" {
+  type        = string
+  description = "Desired state of the compose stack: 'running' starts postgres + the model, 'stopped' stops them (volumes and GGUF weights are kept). Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  default     = "running"
+
+  validation {
+    condition     = contains(["running", "stopped"], var.service_state)
+    error_message = "service_state must be either \"running\" or \"stopped\"."
+  }
+}
