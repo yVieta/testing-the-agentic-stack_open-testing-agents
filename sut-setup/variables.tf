@@ -71,3 +71,14 @@ variable "grafana_admin_password" {
   sensitive = true
   default   = "admin"
 }
+
+variable "service_state" {
+  type        = string
+  description = "Desired state of the SUT services: 'running' starts the pod, 'stopped' stops it and removes it from the user's default.target. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  default     = "running"
+
+  validation {
+    condition     = contains(["running", "stopped"], var.service_state)
+    error_message = "service_state must be either \"running\" or \"stopped\"."
+  }
+}

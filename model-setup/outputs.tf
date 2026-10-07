@@ -36,13 +36,13 @@ output "postgres" {
 output "compose" {
   description = "The podman-compose stack managed by this root module."
   value = {
-    file        = local.compose_file
-    project     = "aigents"
-    services    = ["postgres", "phi4"]
-    fetch       = "model-fetch (profile: fetch, one-shot weight download)"
-    pull_iface  = "podman-compose -f ${local.compose_file} pull"
-    up          = "podman-compose -f ${local.compose_file} up -d"
-    ps          = "podman-compose -f ${local.compose_file} ps"
+    file       = local.compose_file
+    project    = "aigents"
+    services   = ["postgres", "phi4"]
+    fetch      = "model-fetch (profile: fetch, one-shot weight download)"
+    pull_iface = "podman-compose -f ${local.compose_file} pull"
+    up         = "podman-compose -f ${local.compose_file} up -d"
+    ps         = "podman-compose -f ${local.compose_file} ps"
   }
 }
 

@@ -45,6 +45,16 @@ nix develop -c just   # .dhall -> build/<role>/crew.json
 If a role has no compiled crew yet, the worker falls back to a direct chat
 completion against the local model.
 
+### Start / Stop
+
+The desired service state is controlled by the `service_state` variable. Stop
+all agents (disables + stops the quadlet units) or start them again:
+
+```sh
+tofu apply -var service_state=stopped   # stop agent-e2e/pentester/manager
+tofu apply -var service_state=running    # start them again (default)
+```
+
 ## Tuning with Lean4
 
 Proposed tuning parameters default to the harness's

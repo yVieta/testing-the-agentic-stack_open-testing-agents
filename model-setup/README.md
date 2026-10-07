@@ -42,6 +42,16 @@ curl http://127.0.0.1:18080/v1/models        # -> "phi-4-mini"
 podman-compose -f /var/spool/aigents/compose/compose.yaml -p aigents ps
 ```
 
+### Start / Stop
+
+The desired stack state is controlled by the `service_state` variable. Stop the
+model + database (volumes and GGUF weights are kept) or bring them back up:
+
+```sh
+tofu apply -var service_state=stopped   # stop postgres + phi-4-mini
+tofu apply -var service_state=running    # start them again (default)
+```
+
 ## Configuration knobs (highlights)
 
 `model-setup/variables.tf` is the source of truth:

@@ -16,9 +16,9 @@ output "agent_image" {
 output "reach" {
   description = "How each agent reaches the model, db and SUT."
   value = {
-    model     = var.model_url
+    model      = var.model_url
     model_name = var.model_name
-    postgres  = "127.0.0.1:15432 (via credentials.env)"
-    target    = var.target_url
+    postgres   = "127.0.0.1:15432 (via credentials.env)"
+    target     = var.target_url
   }
 }

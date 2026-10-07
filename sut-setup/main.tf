@@ -71,11 +71,12 @@ resource "null_resource" "start_services" {
   ]
 
   triggers = {
-    pod        = local_file.sut_pod_quadlet.content
-    juice      = local_file.juice_shop_quadlet.content
-    grafana    = local_file.grafana_quadlet.content
-    nginx      = local_file.nginx_proxy_quadlet.content
-    nginx_conf = local_file.nginx_default_conf.content
+    pod           = local_file.sut_pod_quadlet.content
+    juice         = local_file.juice_shop_quadlet.content
+    grafana       = local_file.grafana_quadlet.content
+    nginx         = local_file.nginx_proxy_quadlet.content
+    nginx_conf    = local_file.nginx_default_conf.content
+    service_state = var.service_state
   }
 
   provisioner "local-exec" {
@@ -85,13 +86,20 @@ resource "null_resource" "start_services" {
       user=$(id -un)
       wants=${var.home_dir}/.config/systemd/user/default.target.wants
       mkdir -p "$wants"
+      systemctl --user daemon-reload
       # Rootless user services only: no sudo, no firewall changes.
+      if [ "${var.service_state}" = "stopped" ]; then
+        for s in nginx-proxy juice-shop grafana sut-pod; do
+          systemctl --user stop "$s.service" 2>/dev/null || true
+        done
+        systemctl --user disable sut-pod.service 2>/dev/null || true
+        exit 0
+      fi
       for s in juice-shop grafana nginx-proxy; do
         systemctl --user stop "$s.service" 2>/dev/null || true
       done
       ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
       loginctl enable-linger "$user" 2>/dev/null || true
-      systemctl --user daemon-reload
       systemctl --user restart sut-pod.service
     EOT
   }

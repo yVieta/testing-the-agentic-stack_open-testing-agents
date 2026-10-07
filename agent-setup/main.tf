@@ -14,9 +14,9 @@ resource "null_resource" "build_agent_image" {
 
   triggers = {
     containerfile = filesha256("${path.module}/Containerfile")
-    harness      = filesha256("${local.repo_dir}/skills/lean/Main.lean")
-    worker       = filesha256("${local.repo_dir}/worker/run_agent.py")
-    lakefile     = filesha256("${local.repo_dir}/skills/lean/lakefile.toml")
+    harness       = filesha256("${local.repo_dir}/skills/lean/Main.lean")
+    worker        = filesha256("${local.repo_dir}/worker/run_agent.py")
+    lakefile      = filesha256("${local.repo_dir}/skills/lean/lakefile.toml")
   }
 
   provisioner "local-exec" {
@@ -34,13 +34,13 @@ resource "local_file" "agent_quadlet" {
 
   filename = "${local.expanded_quadlet_dir}/agent-${each.key}.container"
   content = templatefile("${path.module}/quadlet/agent.container.tftpl", {
-    repo_dir   = local.repo_dir
-    image      = var.agent_image
-    role_dir   = each.key            # build/<role>
-    agent_role = each.value          # manifest agent name
-    model_url  = var.model_url
-    model_name = var.model_name
-    target_url = var.target_url
+    repo_dir        = local.repo_dir
+    image           = var.agent_image
+    role_dir        = each.key   # build/<role>
+    agent_role      = each.value # manifest agent name
+    model_url       = var.model_url
+    model_name      = var.model_name
+    target_url      = var.target_url
     credential_file = local.credential_file
   })
 }
@@ -54,7 +54,8 @@ resource "null_resource" "start_agents" {
   ]
 
   triggers = {
-    units = join("", [for f in local_file.agent_quadlet : f.content])
+    units         = join("", [for f in local_file.agent_quadlet : f.content])
+    service_state = var.service_state
   }
 
   provisioner "local-exec" {
@@ -62,10 +63,16 @@ resource "null_resource" "start_agents" {
       set -eu
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
       user=$(id -un)
+      systemctl --user daemon-reload
+      if [ "${var.service_state}" = "stopped" ]; then
+        for role in ${join(" ", sort(keys(var.roles)))}; do
+          systemctl --user disable --now "agent-$${role}.service" 2>/dev/null || true
+        done
+        exit 0
+      fi
       if [ "${var.enable_linger}" = "true" ]; then
         loginctl enable-linger "$user" || true
       fi
-      systemctl --user daemon-reload
       for role in ${join(" ", sort(keys(var.roles)))}; do
         systemctl --user enable --now "agent-$${role}.service" 2>/dev/null || true
       done

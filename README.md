@@ -56,6 +56,28 @@ final report, each role writing `previous_output.md` for the next one
 (`worker/run_agent.py` stages a writable copy of its crew directory). All
 reports land in the `documents` table in Postgres.
 
+## Tofu/Terraform Usage on the agents services
+Every module (`model-setup/`, `sut-setup/`, `agent-setup/`) accepts a
+`service_state` variable (`running` | `stopped`). To stop the SUT pod, the
+compose stack and the agent quadlet services — then start them again — run,
+in reverse startup order:
+
+```sh
+# start/ (start again)
+tofu -chdir=sut-setup   apply -var service_state=running
+tofu -chdir=model-setup apply -var service_state=running
+tofu -chdir=agent-setup apply -var service_state=running
+# Stop
+tofu -chdir=agent-setup apply -var service_state=stopped
+tofu -chdir=model-setup apply -var service_state=stopped
+tofu -chdir=sut-setup   apply -var service_state=stopped
+```
+
+Stopping keeps all state: podman images, GGUF weights and the Postgres data
+directory are untouched. `tofu destroy` in each module removes the declared
+configuration completely — note the state is currently git-ignored and was
+dropped, so on a fresh checkout `destroy` cannot find the deployed services.
+
 ## Architecture
 
 | Role            | Crew dir        | Work                              | Output            |
