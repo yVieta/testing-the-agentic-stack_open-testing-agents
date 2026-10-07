@@ -21,6 +21,7 @@ resource "local_file" "grafana_quadlet" {
       grafana_image          = var.grafana_image
       grafana_admin_user     = var.grafana_admin_user
       grafana_admin_password = var.grafana_admin_password
+      grafana_listen_port    = var.grafana_listen_port
     }
   )
 }
@@ -30,10 +31,11 @@ resource "local_file" "sut_pod_quadlet" {
   content = templatefile(
     "${path.module}/quadlet/sut.pod.tftpl",
     {
-      bind_address    = var.bind_address
-      nginx_http_port = var.nginx_http_port
-      juice_shop_port = var.juice_shop_port
-      grafana_port    = var.grafana_port
+      bind_address        = var.bind_address
+      nginx_http_port     = var.nginx_http_port
+      juice_shop_port     = var.juice_shop_port
+      grafana_port        = var.grafana_port
+      grafana_listen_port = var.grafana_listen_port
     }
   )
 }
@@ -51,39 +53,12 @@ resource "local_file" "nginx_proxy_quadlet" {
 
 resource "local_file" "nginx_default_conf" {
   filename = "${local.expanded_nginx_dir}/default.conf"
-  content  = file("${path.module}/nginx/default.conf")
-}
-
-resource "null_resource" "install_podman" {
-  provisioner "local-exec" {
-    command = "doas apt-get install -y ${join(" ", var.install_packages)}"
-  }
-}
-
-resource "null_resource" "open_firewall" {
-  count = var.expose_public ? 1 : 0
-
-  depends_on = [null_resource.install_podman]
-
-  triggers = {
-    ports = join(",", [
-      var.nginx_http_port,
-      var.juice_shop_port,
-      var.grafana_port,
-    ])
-    bind_address = var.bind_address
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      set -eux
-      for p in ${var.nginx_http_port} ${var.juice_shop_port} ${var.grafana_port}; do
-        doas sh -c 'command -v iptables >/dev/null 2>&1 || exit 0
-          iptables -C INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment security-sut 2>/dev/null ||
-            iptables -I INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment security-sut' sh "$p"
-      done
-    EOT
-  }
+  content = templatefile(
+    "${path.module}/nginx/default.conf.tftpl",
+    {
+      grafana_listen_port = var.grafana_listen_port
+    }
+  )
 }
 
 resource "null_resource" "start_services" {
@@ -93,7 +68,6 @@ resource "null_resource" "start_services" {
     local_file.sut_pod_quadlet,
     local_file.nginx_proxy_quadlet,
     local_file.nginx_default_conf,
-    null_resource.install_podman,
   ]
 
   triggers = {
@@ -111,11 +85,12 @@ resource "null_resource" "start_services" {
       user=$(id -un)
       wants=${var.home_dir}/.config/systemd/user/default.target.wants
       mkdir -p "$wants"
-      for s in juice-shop grafana; do
+      # Rootless user services only: no sudo, no firewall changes.
+      for s in juice-shop grafana nginx-proxy; do
         systemctl --user stop "$s.service" 2>/dev/null || true
       done
       ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
-      loginctl enable-linger "$user"
+      loginctl enable-linger "$user" 2>/dev/null || true
       systemctl --user daemon-reload
       systemctl --user restart sut-pod.service
     EOT

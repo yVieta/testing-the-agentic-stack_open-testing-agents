@@ -36,8 +36,8 @@ variable "model_name" {
 
 variable "target_url" {
   type        = string
-  description = "System under test the agents exercise."
-  default     = "http://127.0.0.1:80"
+  description = "System under test the agents exercise (nginx proxy of the rootless SUT on 127.0.0.1)."
+  default     = "http://127.0.0.1:8080"
 }
 
 variable "agent_image" {

@@ -7,7 +7,9 @@ Requires=sut-pod.service
 Image=${juice_shop_image}
 Pull=newer
 Pod=sut.pod
-HealthCmd=/nodejs/bin/node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+# Exec-form health command: the juice-shop image ships no shell, so a
+# CMD-SHELL health check (podman default) cannot run inside it.
+HealthCmd=["/nodejs/bin/node","-e","require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode>=200&&r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
 HealthInterval=30s
 
 [Service]

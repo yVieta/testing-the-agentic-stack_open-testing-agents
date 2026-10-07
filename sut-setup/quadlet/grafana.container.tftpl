@@ -7,6 +7,9 @@ Requires=sut-pod.service
 Image=${grafana_image}
 Pull=newer
 Pod=sut.pod
+# Distinct internal port so Juice Shop (3000) and Grafana share the pod
+# network namespace without colliding (see issues note #4).
+Environment=GF_SERVER_HTTP_PORT=${grafana_listen_port}
 Environment=GF_SECURITY_ADMIN_USER=${grafana_admin_user}
 Environment=GF_SECURITY_ADMIN_PASSWORD=${grafana_admin_password}
 Environment=GF_USERS_ALLOW_SIGN_UP=false

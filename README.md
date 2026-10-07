@@ -13,7 +13,7 @@ and `agent-setup/` renders the agent Quadlet units.
 
 ```mermaid
 graph TD
-    SUT["<b>local web server</b><br/>system under test (Juice Shop)<br/>http://127.0.0.1:80"]
+    SUT["<b>local web server</b><br/>system under test (Juice Shop via nginx)<br/>http://127.0.0.1:8080"]
 
     subgraph AGENTS["Podman Quadlet services (same host)"]
         direction LR
