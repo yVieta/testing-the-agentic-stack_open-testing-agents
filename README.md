@@ -1,4 +1,4 @@
-# open-testing-agents-paiselfhost
+# open-testing-agents:selfhost
 
 Self-hosted testing agents: three crewAI agents run **locally** on one server as
 Podman **Quadlet** services, each connecting **directly** to a self-hosted
