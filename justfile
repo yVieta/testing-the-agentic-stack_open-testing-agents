@@ -46,7 +46,7 @@ crews: manifest agents
     @printf 'Compiled Dhall -> JSON for %d local agent crews under %s/\n' \
         "$(jq 'length' "{{ build_dir }}/.manifest.json")" "{{ build_dir }}"
 
-# chicken egg 
+# chicken egg (nix dev shell) 
 shell:
     nix develop
 
