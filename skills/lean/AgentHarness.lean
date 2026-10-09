@@ -5,12 +5,13 @@ Lean 4 port of AgentHarness.agda. Built on the standard library (no axioms).
 - section 1: the crew roles and the chain between them (no MQTT; local files)
 - section 2: action boundaries + tool pre-conditions
 - section 3: worker state transitions
-- section 4: tuning parameters + safety envelope (WellTuned)
-- section 5: the tuning loop (safe widening/more-step lemmas)
-- section 6: verification feedback (review : Tuning → Verdict)
+- section 4: tuning parameters + per-role safety envelope (WellTuned r t)
+- section 5: the tuning loop (safe widening/more-step lemmas, role-bounded)
+- section 6: verification feedback (review : Role → Tuning → Verdict)
 
 Worker usage (worker/run_agent.py):
-    lake env lean --run Main.lean queue_size dedupe_cap crew_timeout steps step_cost
+    lake env lean --run Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost
+    (role ∈ { e2e, pentester, manager })
 -/
 
 namespace AgentHarness
@@ -21,6 +22,7 @@ inductive Role : Type where
   | e2e       : Role  -- pi1-e2e
   | pentester : Role  -- pi2-pentester
   | manager   : Role  -- pi3-manager
+  deriving Repr
 
 inductive Topic : Type where
   | crew_start            : Topic  -- crew/start
@@ -215,7 +217,7 @@ theorem never_failed : transition (transition (transition Phase.idle Event.kicko
 theorem crashed_cannot_publish : may_publish (transition (transition Phase.idle Event.kickoff) Event.crashed) → False
   | h => h
 
-/-! 4. Tuning -/
+/-! 4. Tuning, role-aware -/
 
 structure Tuning : Type where
   queue_size   : Nat  -- QUEUE
@@ -225,52 +227,106 @@ structure Tuning : Type where
   step_cost    : Nat  -- seconds per step
   deriving Repr
 
-def defaults : Tuning :=
-  { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 4, step_cost := 900 }
+-- Per-role ceilings. The three crews have different work profiles, so the
+-- safety envelope is role-aware:
+--   e2e       : many quick playwright runs   -> bigger queue, more steps, short steps
+--   pentester : slow nmap/nikto/sqlmap scans -> small queue, fewer steps, long steps
+--   manager   : review + report shaping      -> moderate budget
+def maxQueue (r : Role) : Nat :=
+  match r with
+  | Role.e2e       => 64
+  | Role.pentester => 32
+  | Role.manager   => 32
 
-/-- A tuning is safe when the dedupe window is big enough for the queue and
-the crew budget fits inside the timeout. -/
-structure WellTuned (t : Tuning) : Prop where
-  dedupe_window : t.queue_size ≤ t.dedupe_cap
-  crew_budget   : t.steps * t.step_cost ≤ t.crew_timeout
+def maxSteps (r : Role) : Nat :=
+  match r with
+  | Role.e2e       => 6
+  | Role.pentester => 4
+  | Role.manager   => 4
 
--- Decidable because both obligations are decidable Nat comparisons.
-instance (t : Tuning) : Decidable (WellTuned t) :=
+def maxStepCost (r : Role) : Nat :=
+  match r with
+  | Role.e2e       => 600   -- 10 min per playwright step
+  | Role.pentester => 1200  -- 20 min per scan step
+  | Role.manager   => 900   -- 15 min per review step
+
+-- Total budget a role may claim: every step at the ceiling cost.
+def maxTimeout (r : Role) : Nat := maxSteps r * maxStepCost r
+
+-- A tuning is safe for a role when the queue fits the dedupe window and every
+-- dimension stays inside that role's ceiling.
+structure WellTuned (r : Role) (t : Tuning) : Prop where
+  dedupe_window   : t.queue_size ≤ t.dedupe_cap
+  queue_ceiling   : t.queue_size ≤ maxQueue r
+  step_ceiling    : t.steps ≤ maxSteps r
+  cost_ceiling    : t.step_cost ≤ maxStepCost r
+  budget          : t.steps * t.step_cost ≤ t.crew_timeout
+  timeout_ceiling : t.crew_timeout ≤ maxTimeout r
+
+-- Decidable because every obligation is a decidable Nat comparison.
+instance (r : Role) (t : Tuning) : Decidable (WellTuned r t) :=
   match Nat.decLe t.queue_size t.dedupe_cap,
-        Nat.decLe (t.steps * t.step_cost) t.crew_timeout with
-  | isTrue h1, isTrue h2 => isTrue ⟨h1, h2⟩
-  | isFalse h1, _ => isFalse fun w => h1 w.dedupe_window
-  | _, isFalse h2 => isFalse fun w => h2 w.crew_budget
+        Nat.decLe t.queue_size (maxQueue r),
+        Nat.decLe t.steps (maxSteps r),
+        Nat.decLe t.step_cost (maxStepCost r),
+        Nat.decLe (t.steps * t.step_cost) t.crew_timeout,
+        Nat.decLe t.crew_timeout (maxTimeout r) with
+  | isTrue h1, isTrue h2, isTrue h3, isTrue h4, isTrue h5, isTrue h6 =>
+      isTrue ⟨h1, h2, h3, h4, h5, h6⟩
+  | isFalse h1, _, _, _, _, _ => isFalse fun w => h1 w.dedupe_window
+  | _, isFalse h2, _, _, _, _ => isFalse fun w => h2 w.queue_ceiling
+  | _, _, isFalse h3, _, _, _ => isFalse fun w => h3 w.step_ceiling
+  | _, _, _, isFalse h4, _, _ => isFalse fun w => h4 w.cost_ceiling
+  | _, _, _, _, isFalse h5, _ => isFalse fun w => h5 w.budget
+  | _, _, _, _, _, isFalse h6 => isFalse fun w => h6 w.timeout_ceiling
 
-theorem defaults_tuned : WellTuned defaults := by
-  constructor
-  · native_decide
-  · native_decide
+-- Shipped tuning per role, each inside its own envelope.
+def defaults (r : Role) : Tuning :=
+  match r with
+  | Role.e2e       => { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 4, step_cost := 600 }
+  | Role.pentester => { queue_size := 32, dedupe_cap := 256, crew_timeout := 4800, steps := 4, step_cost := 1200 }
+  | Role.manager   => { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 4, step_cost := 900 }
+
+theorem defaults_tuned : ∀ r : Role, WellTuned r (defaults r) := by
+  intro r
+  cases r <;> constructor <;> native_decide
 
 /-! 5. Tuning loop -/
 
--- Safe operations the worker may apply on an accepted tuning.
-def widen_queue (n : Nat) : Tuning :=
-  { queue_size := n, dedupe_cap := n + 256, crew_timeout := 3600, steps := 4, step_cost := 900 }
+-- Safe operations the worker may apply on an accepted tuning; each keeps the
+-- tuning inside the role's envelope.
 
-theorem widen_queue_sound (n : Nat) : WellTuned (widen_queue n) := by
+-- Raise the queue to n; the dedupe window grows with it.
+def widen_queue (r : Role) (n : Nat) : Tuning :=
+  { queue_size := n, dedupe_cap := n + 256
+  , crew_timeout := maxTimeout r, steps := maxSteps r, step_cost := maxStepCost r }
+
+theorem widen_queue_sound (r : Role) (n : Nat) (h : n ≤ maxQueue r) : WellTuned r (widen_queue r n) := by
   constructor
   · exact Nat.le_add_right n 256
-  · change 4 * 900 ≤ 3600
-    native_decide
+  · exact h
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
 
+-- Hand a role more time, within its ceiling.
 def give_more_time (t : Tuning) : Tuning :=
   { t with crew_timeout := t.crew_timeout + 1 }
 
-theorem give_more_time_sound {t : Tuning} (h : WellTuned t) : WellTuned (give_more_time t) := by
+theorem give_more_time_sound {r : Role} {t : Tuning} (h : WellTuned r t)
+    (hc : t.crew_timeout + 1 ≤ maxTimeout r) : WellTuned r (give_more_time t) := by
   constructor
   · exact h.dedupe_window
-  · rw [give_more_time]
-    rw [← Nat.succ_eq_add_one t.crew_timeout]
-    exact Nat.le_trans h.crew_budget (Nat.le_succ t.crew_timeout)
+  · exact h.queue_ceiling
+  · exact h.step_ceiling
+  · exact h.cost_ceiling
+  · exact Nat.le_trans h.budget (Nat.le_succ t.crew_timeout)
+  · exact hc
 
+-- Add a step, within the role's step ceiling, and re-draw the timeout.
 def raise_steps (t : Tuning) (o : Nat) : Tuning :=
-  { queue_size := t.queue_size, dedupe_cap := t.dedupe_cap, crew_timeout := o, steps := t.steps + 1, step_cost := t.step_cost }
+  { t with crew_timeout := o, steps := t.steps + 1 }
 
 theorem more_steps_needs_more_time {t : Tuning} {o : Nat}
     (h : (t.steps + 1) * t.step_cost ≤ o) : t.steps * t.step_cost ≤ o := by
@@ -282,41 +338,69 @@ theorem more_cost_needs_more_time {t : Tuning} {o : Nat}
   rw [← Nat.succ_eq_add_one t.step_cost] at h
   exact Nat.le_trans (Nat.mul_le_mul_left t.steps (Nat.le_succ t.step_cost)) h
 
-/-- An overspending tuning is rejected. -/
-def greedy : Tuning :=
-  { queue_size := 32, dedupe_cap := 256, crew_timeout := 3600, steps := 8, step_cost := 900 }
+theorem raise_steps_sound {r : Role} {t : Tuning} {o : Nat}
+    (h : WellTuned r t)
+    (hs : t.steps + 1 ≤ maxSteps r)
+    (ho : o ≤ maxTimeout r)
+    (hb : (t.steps + 1) * t.step_cost ≤ o) :
+    WellTuned r (raise_steps t o) := by
+  constructor
+  · exact h.dedupe_window
+  · exact h.queue_ceiling
+  · exact hs
+  · exact h.cost_ceiling
+  · rw [raise_steps]
+    exact hb
+  · rw [raise_steps]
+    exact ho
 
-theorem greedy_rejected : ¬ WellTuned greedy := by
+-- Worked examples: a greedy e2e tuning skips the step ceiling and is rejected;
+-- a balanced proposal is accepted for every role; the pentester's slow
+-- long-step tuning is outside the e2e envelope (role awareness in action).
+def greedy_e2e : Tuning :=
+  { queue_size := 32, dedupe_cap := 256, crew_timeout := 7200, steps := 8, step_cost := 600 }
+
+theorem greedy_e2e_rejected : ¬ WellTuned Role.e2e greedy_e2e := by
   native_decide
 
-/-- A balanced proposal is accepted. -/
-def proposal : Tuning :=
-  { queue_size := 32, dedupe_cap := 512, crew_timeout := 7200, steps := 4, step_cost := 1800 }
+def proposal (r : Role) : Tuning :=
+  { queue_size := maxQueue r, dedupe_cap := maxQueue r + 256
+  , crew_timeout := maxTimeout r, steps := maxSteps r, step_cost := maxStepCost r }
 
-theorem proposal_accepted : WellTuned proposal := by
+theorem proposal_accepted : ∀ r : Role, WellTuned r (proposal r) := by
+  intro r
   constructor
-  · native_decide
-  · native_decide
+  · exact Nat.le_add_right (maxQueue r) 256
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
 
-/-! 6. Feedback -/
+/-! 6. Feedback (role-aware) -/
 
 inductive Verdict : Type where
   | accepted : Verdict
   | rejected : Verdict
   deriving Repr, DecidableEq
 
-def review (t : Tuning) : Verdict :=
-  if (WellTuned t) then Verdict.accepted else Verdict.rejected
+def review (r : Role) (t : Tuning) : Verdict :=
+  if (WellTuned r t) then Verdict.accepted else Verdict.rejected
 
 structure Feedback : Type where
+  role    : Role
   verdict : Verdict
   params  : Tuning
   deriving Repr
 
-theorem defaults_verdict : review defaults = Verdict.accepted := by
+theorem defaults_verdict : ∀ r : Role, review r (defaults r) = Verdict.accepted := by
+  intro r
+  cases r <;> native_decide
+
+theorem greedy_e2e_verdict : review Role.e2e greedy_e2e = Verdict.rejected := by
   native_decide
 
-theorem greedy_verdict : review greedy = Verdict.rejected := by
+theorem cross_role_safety : review Role.e2e (defaults Role.pentester) = Verdict.rejected := by
   native_decide
 
 end AgentHarness

@@ -32,8 +32,21 @@ DSN = os.environ.get("POSTGRES_DSN", "")
 HARNESS = Path(os.environ.get("HARNESS_DIR", "/opt/harness"))  # lean project, baked in image
 SECRETS = Path("/run/secrets/credentials.env")
 
-# AgentHarness default Tuning: queue_size dedupe_cap crew_timeout steps step_cost.
-DEFAULT_TUNING = [32, 256, 3600, 4, 900]
+# AgentHarness default Tuning per role: queue_size dedupe_cap crew_timeout
+# steps step_cost. The e2e crew runs many quick playwright tests, the pentester
+# runs slow nmap/nikto/sqlmap scans, the manager reviews and shapes the report;
+# the per-role envelopes live in skills/lean/AgentHarness.lean.
+DEFAULT_TUNING = {
+    "e2e":       [32, 256, 3600, 4, 600],
+    "pentester": [32, 256, 4800, 4, 1200],
+    "manager":   [32, 256, 3600, 4, 900],
+}
+# build/<role> dir names and agent names -> harness Role (Main.lean arg).
+HARNESS_ROLE = {
+    "e2e": "e2e",             "e2e_test_agent": "e2e",
+    "pentester": "pentester", "pentester_agent": "pentester",
+    "manager": "manager",     "test_manager_agent": "manager",
+}
 INTERVAL = int(os.environ.get("RUN_INTERVAL", "900"))  # seconds between runs
 
 stop = False
@@ -50,9 +63,22 @@ def load_secrets() -> None:
         os.environ.setdefault(k.strip(), v.strip())
 
 
+def harness_role() -> str:
+    """Map this worker's role to the Lean4 harness Role name.
+
+    The quadlet units set CREW_DIR=/repo/build/<role>, which is exactly the
+    harness Role; fall back to the agent name for direct runs.
+    """
+    name = Path(CREW_DIR).name
+    if name in HARNESS_ROLE:
+        return HARNESS_ROLE[name]
+    return HARNESS_ROLE.get(ROLE, "e2e")
+
+
 def lean_verdict(tuning):
-    """Run the Lean4 harness check for the tuning; accepted/rejected/error."""
-    cmd = ["lake", "env", "lean", "--run", "Main.lean"] + [str(v) for v in tuning]
+    """Run the Lean4 harness check for this role's tuning; accepted/rejected/error."""
+    cmd = ["lake", "env", "lean", "--run", "Main.lean",
+           harness_role()] + [str(v) for v in tuning]
     r = subprocess.run(cmd, cwd=HARNESS, capture_output=True, text=True, timeout=300)
     out = r.stdout.strip().lower()
     if out in ("accepted", "rejected"):
@@ -164,11 +190,13 @@ def store(collection: str, content: str, metadata: dict) -> None:
 
 
 def run_once() -> int:
-    tuning = tuple(int(os.environ.get(k, DEFAULT_TUNING[i]))
+    role = harness_role()
+    defaults = DEFAULT_TUNING[role]
+    tuning = tuple(int(os.environ.get(k, defaults[i]))
                    for i, k in enumerate(["QUEUE_SIZE", "DEDUPE_CAP",
                                           "CREW_TIMEOUT", "STEPS", "STEP_COST"]))
     verdict = lean_verdict(tuning)
-    print(f"role={ROLE} tuning={tuning} verdict={verdict}", flush=True)
+    print(f"role={ROLE} harness_role={role} tuning={tuning} verdict={verdict}", flush=True)
     if verdict != "accepted":
         print("tuning rejected by the Lean4 harness, crew skipped", file=sys.stderr)
         store(ROLE, f"tuning rejected: {tuning} ({verdict})", {"verdict": verdict})

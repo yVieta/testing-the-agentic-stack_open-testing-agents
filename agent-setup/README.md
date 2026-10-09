@@ -57,11 +57,19 @@ tofu apply -var service_state=running    # start them again (default)
 
 ## Tuning with Lean4
 
-Proposed tuning parameters default to the harness's
-`Tuning {queue_size=32, dedupe_cap=256, crew_timeout=3600, steps=4, step_cost=900}`.
-Every cycle the worker runs `lake env lean --run Main.lean` (the harness at
-`/opt/harness`) and only executes the crew when the verdict is `accepted`.
-Rejected tunings are logged to postgres instead. Override per role with:
+The harness is role-aware: each role gets its own `WellTuned` envelope and
+default tuning (see `skills/lean/AgentHarness.lean`):
+
+| Role      | queue | dedupe | timeout | steps | step_cost |
+|-----------|-------|--------|---------|-------|-----------|
+| e2e       | 32    | 256    | 3600    | 4     | 600       |
+| pentester | 32    | 256    | 4800    | 4     | 1200      |
+| manager   | 32    | 256    | 3600    | 4     | 900       |
+
+Every cycle the worker runs `lake env lean --run Main.lean <role> ...` (the
+harness at `/opt/harness`) and only executes the crew when that role's verdict
+is `accepted`. Rejected tunings are logged to postgres instead. Override per
+role with:
 
 ```sh
 systemctl --user set-environment QUEUE_SIZE=64

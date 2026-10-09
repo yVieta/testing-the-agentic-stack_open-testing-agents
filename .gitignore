@@ -19,3 +19,6 @@ secrets/
 *.tfplan
 plan.tfplan
 crash.log
+
+# Lean4 harness build artifacts (lake build)
+.lake/

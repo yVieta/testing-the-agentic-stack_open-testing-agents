@@ -15,6 +15,7 @@ resource "null_resource" "build_agent_image" {
   triggers = {
     containerfile = filesha256("${path.module}/Containerfile")
     harness       = filesha256("${local.repo_dir}/skills/lean/Main.lean")
+    harness_lib   = filesha256("${local.repo_dir}/skills/lean/AgentHarness.lean")
     worker        = filesha256("${local.repo_dir}/worker/run_agent.py")
     lakefile      = filesha256("${local.repo_dir}/skills/lean/lakefile.toml")
   }
@@ -58,8 +59,10 @@ resource "null_resource" "start_agents" {
     service_state = var.service_state
     # A rebuilt image or worker script is only picked up by a restarted unit;
     # include their hashes so `tofu apply` converges the running agents too.
-    image  = filesha256("${path.module}/Containerfile")
-    worker = filesha256("${local.repo_dir}/worker/run_agent.py")
+    image         = filesha256("${path.module}/Containerfile")
+    harness       = filesha256("${local.repo_dir}/skills/lean/Main.lean")
+    harness_lib   = filesha256("${local.repo_dir}/skills/lean/AgentHarness.lean")
+    worker        = filesha256("${local.repo_dir}/worker/run_agent.py")
   }
 
   provisioner "local-exec" {

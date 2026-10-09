@@ -149,15 +149,19 @@ the model picker and the chat runs as the test manager against phi-4-mini.
 
 Every cycle the worker asks the **Lean4 harness** to review the current tuning
 parameters (`skills/lean/Main.lean` — queue_size, dedupe_cap, crew_timeout,
-steps, step_cost). Only a verdict of `accepted` lets the crew run.
+steps, step_cost) against that role's own `WellTuned` envelope. Only a verdict
+of `accepted` lets the crew run.
 
 ## Formal Verification with Lean4
 
 - **Harnessing:** agent action boundaries, tool pre-conditions and state
   transitions are formal types in `skills/lean/AgentHarness.lean`.
-- **Tuning:** proposed parameters are only applied when
-  `AgentHarness.review` accepts them, giving a mathematically guaranteed
-  safety loop. (The Agda source in `skills/agda` is kept for traceability.)
+- **Tuning:** the safety envelope is role-aware — the e2e crew gets more,
+  quicker steps, the pentester fewer, longer scan steps, the manager a
+  moderate review budget. Proposed parameters are only applied when
+  `AgentHarness.review` accepts them for that role, giving a mathematically
+  guaranteed safety loop. (The Agda source in `skills/agda` is kept for
+  traceability.)
 
 ## Hardware & Model Specs
 
