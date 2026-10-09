@@ -75,13 +75,53 @@ def patch_llm(adir: Path) -> None:
         f.write_text(doc)
 
 
+def refresh_crew_dir() -> None:
+    """Copy the compiled crew under build/ into the writable WORK dir.
+
+    The installed `.venv` and uv lockfile are kept across runs so crewai's
+    uv runner treats the environment as ready (otherwise every cycle
+    rebuilds a bare venv that crashes on `import click`).
+    """
+    WORK.mkdir(parents=True, exist_ok=True)
+    for entry in WORK.iterdir():
+        if entry.name in (".venv", "uv.lock", "poetry.lock"):
+            continue
+        if entry.is_dir():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+    for entry in CREW_DIR.iterdir():
+        dst = WORK / entry.name
+        if entry.is_dir():
+            if dst.exists():
+                shutil.rmtree(dst, ignore_errors=True)
+            shutil.copytree(entry, dst)
+        else:
+            shutil.copy2(entry, dst)
+
+
+def ensure_venv() -> None:
+    """Give crewai's uv runner a venv that can see the image's site-packages.
+
+    crewai >= 1.15 shells out to `uv sync` which builds a fresh, isolated
+    venv by default; that venv lacks crewai/click/litellm and dies with
+    `ModuleNotFoundError: No module named 'click'`. Pre-seeding a
+    `--system-site-packages` venv that uv then reuses fixes it.
+    """
+    if not (WORK / ".venv").is_dir():
+        subprocess.run(
+            ["python3", "-m", "venv", "--system-site-packages",
+             str(WORK / ".venv")],
+            check=True, timeout=120)
+
+
 def run_crew() -> str:
     """Run the compiled crew when present, else a direct model call."""
     if not (CREW_DIR / "crew.json").is_file():
         return direct_call()
-    shutil.rmtree(WORK, ignore_errors=True)
-    shutil.copytree(CREW_DIR, WORK)
+    refresh_crew_dir()
     patch_llm(WORK)
+    ensure_venv()
     env = os.environ.copy()
     env.update({"OPENAI_API_BASE": MODEL_URL, "OPENAI_MODEL_NAME": MODEL_NAME,
                 "OPENAI_API_KEY": "local"})

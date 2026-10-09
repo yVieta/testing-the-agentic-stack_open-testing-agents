@@ -50,8 +50,8 @@ variable "model_port" {
 
 variable "model_image" {
   type        = string
-  description = "llama.cpp server image. The ggml-org image ships /app/llama-server plus curl/bash, which the fetch and health commands need."
-  default     = "ghcr.io/ggml-org/llama.cpp:server"
+  description = "llama.cpp server image. The ggml-org image ships /app/llama-server plus curl/bash, which the fetch and health commands need. `server-cuda` bundles the CUDA runtime (driver 615 works with the bundled CUDA 12.8)."
+  default     = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 }
 
 variable "model_repo" {
@@ -92,14 +92,26 @@ variable "model_threads" {
 
 variable "model_parallel_slots" {
   type        = number
-  description = "Concurrent request slots. Each slot multiplies the KV cache, so keep this at 1 on a memory constrained host."
+  description = "Concurrent request slots for the crew-facing model server (phi4). Each slot multiplies the KV cache; 2 lets crews overlap."
+  default     = 2
+}
+
+variable "model_cli_port" {
+  type        = number
+  description = "Host port of the second phi-4-mini instance dedicated to the interactive test-manager CLI."
+  default     = 18081
+}
+
+variable "model_cli_parallel_slots" {
+  type        = number
+  description = "Slots for the CLI-dedicated model server (phi4-cli); 1 is enough for a single interactive terminal."
   default     = 1
 }
 
 variable "model_gpu_layers" {
   type        = number
-  description = "Layers offloaded to VRAM. This host is an AMD iGPU box without CUDA/ROCm, so it stays 0 and inference runs on the CPU."
-  default     = 0
+  description = "Layers offloaded to VRAM. 0 runs pure CPU. 99 offloads every phi-4-mini layer to the NVIDIA GPU (RTX 3060, CDI device nvidia.com/gpu=all). Both phi4 instances share the GPU."
+  default     = 99
 }
 
 variable "model_kv_cache_type" {

@@ -56,6 +56,10 @@ resource "null_resource" "start_agents" {
   triggers = {
     units         = join("", [for f in local_file.agent_quadlet : f.content])
     service_state = var.service_state
+    # A rebuilt image or worker script is only picked up by a restarted unit;
+    # include their hashes so `tofu apply` converges the running agents too.
+    image  = filesha256("${path.module}/Containerfile")
+    worker = filesha256("${local.repo_dir}/worker/run_agent.py")
   }
 
   provisioner "local-exec" {
@@ -75,6 +79,7 @@ resource "null_resource" "start_agents" {
       fi
       for role in ${join(" ", sort(keys(var.roles)))}; do
         systemctl --user enable --now "agent-$${role}.service" 2>/dev/null || true
+        systemctl --user restart "agent-$${role}.service" 2>/dev/null || true
       done
     EOT
   }

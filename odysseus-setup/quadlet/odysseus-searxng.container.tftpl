@@ -1,0 +1,35 @@
+[Unit]
+Description=odysseus SearXNG metasearch (systemd-managed container)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${searxng_image}
+ContainerName=odysseus-searxng
+PublishPort=${bind_address}:${searxng_port}:8080
+Volume=odysseus-searxng-data:/etc/searxng
+Volume=${searxng_settings_dir}/settings.yml:/tmp/searxng-settings.yml:ro,Z
+Environment=SEARXNG_BASE_URL=http://localhost:${searxng_port}/
+# The upstream image needs to chown /etc/searxng, drop privs via su-exec and
+# write settings.yml into the named volume on first boot (mirrors the cap set
+# recommended by searxng-docker / odysseus issue #721).
+AddCapability=CHOWN
+AddCapability=SETGID
+AddCapability=SETUID
+AddCapability=DAC_OVERRIDE
+DropCapability=ALL
+# Bootstrap the settings file into the volume once, then hand over to the
+# upstream entrypoint. Rendered settings already carry the real secret.
+Exec=/bin/sh -c "if [ ! -s /etc/searxng/settings.yml ]; then cp /tmp/searxng-settings.yml /etc/searxng/settings.yml; fi; exec /usr/local/searxng/entrypoint.sh"
+HealthCmd=python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/', timeout=5).read(1)"
+HealthInterval=5s
+HealthTimeout=6s
+HealthRetries=20
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

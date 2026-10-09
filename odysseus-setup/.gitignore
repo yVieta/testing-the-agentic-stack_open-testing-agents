@@ -1,0 +1,9 @@
+# Local OpenTofu state/plugins — never commit.
+# Mirrors the .gitignore in the sibling modules (model-setup/, sut-setup/,
+# agent-setup/): the state holds the generated admin password in plaintext.
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+plan.tfplan
+.terraform/
+.terraform.lock.hcl

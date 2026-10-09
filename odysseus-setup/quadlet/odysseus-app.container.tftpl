@@ -1,0 +1,40 @@
+[Unit]
+Description=odysseus AI workspace (systemd-managed container)
+After=network-online.target odysseus-searxng.service odysseus-chromadb.service
+Wants=network-online.target
+Requires=odysseus-searxng.service odysseus-chromadb.service
+
+[Container]
+Image=${app_image}
+ContainerName=odysseus-app
+# Host networking: the rootless container cannot reach host-loopback services
+# (the two phi-4-mini instances, SearXNG, ChromaDB) through pasta's gateway,
+# so the app shares the host net and talks to them on 127.0.0.1 directly.
+Network=host
+Volume=${odysseus_dir}/data:/app/data:z
+Volume=${odysseus_dir}/logs:/app/logs:z
+Volume=${odysseus_dir}/data/ssh:/app/.ssh:z
+Volume=${odysseus_dir}/data/huggingface:/app/.cache/huggingface:z
+Volume=${odysseus_dir}/data/local:/app/.local:z
+Environment=LLM_HOST=${llm_host}
+Environment=LLM_HOSTS=${llm_hosts}
+Environment=RESEARCH_LLM_ENDPOINT=${research_llm_endpoint}
+Environment=SEARXNG_INSTANCE=http://127.0.0.1:${searxng_port}
+Environment=CHROMADB_HOST=127.0.0.1
+Environment=CHROMADB_PORT=${chromadb_port}
+Environment=DATABASE_URL=sqlite:///./data/app.db
+Environment=AUTH_ENABLED=${auth_enabled}
+Environment=LOCALHOST_BYPASS=${localhost_bypass}
+Environment=ODYSSEUS_ADMIN_USER=${admin_user}
+Environment=ODYSSEUS_ADMIN_PASSWORD=${admin_password}
+Environment=ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
+Environment=PUID=${puid}
+Environment=PGID=${pgid}
+Environment=FASTEMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+[Service]
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

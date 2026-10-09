@@ -8,3 +8,14 @@ wheels/
 build/
 secrets/
 .DS_Store
+.terraform.tfstate.lock.info
+
+# Terraform / OpenTofu — local providers, plans and state are per-host
+# artifacts and must never be shared (state can hold generated secrets).
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+plan.tfplan
+crash.log

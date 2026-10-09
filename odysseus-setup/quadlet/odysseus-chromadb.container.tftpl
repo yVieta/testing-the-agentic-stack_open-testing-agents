@@ -1,0 +1,18 @@
+[Unit]
+Description=odysseus ChromaDB vector store (systemd-managed container)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${chromadb_image}
+ContainerName=odysseus-chromadb
+PublishPort=${bind_address}:${chromadb_port}:8000
+Volume=odysseus-chromadb-data:/chroma/chroma
+Environment=ANONYMIZED_TELEMETRY=FALSE
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

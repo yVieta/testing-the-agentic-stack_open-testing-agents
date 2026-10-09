@@ -1,0 +1,19 @@
+[Unit]
+Description=odysseus ntfy notification push (systemd-managed container)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${ntfy_image}
+ContainerName=odysseus-ntfy
+Exec=serve
+PublishPort=${bind_address}:${ntfy_port}:80
+Volume=odysseus-ntfy-cache:/var/cache/ntfy
+Environment=NTFY_BASE_URL=http://localhost:${ntfy_port}
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

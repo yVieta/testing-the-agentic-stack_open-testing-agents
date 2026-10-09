@@ -50,6 +50,11 @@ crews: manifest agents
 shell:
     nix develop
 
+# Interactive test-manager agent CLI: talks to the local model with the test
+# manager persona (see worker/tm_cli.py). Ctrl+D to exit.
+tm:
+    nix develop -c python3 worker/tm_cli.py
+
 # Remove build/.
 clean:
     @rm -rf "{{ build_dir }}"

@@ -17,6 +17,8 @@ output "model" {
     file       = var.model_file
     url        = "http://${var.bind_address}:${local.model_port}/v1"
     health     = "http://${var.bind_address}:${local.model_port}/health"
+    cli_url    = "http://${var.bind_address}:${local.model_cli_port}/v1"
+    cli_health = "http://${var.bind_address}:${local.model_cli_port}/health"
     weights_at = local.model_file_path
     auth       = nonsensitive(var.model_api_key) == "" ? "disabled" : "bearer token required"
   }

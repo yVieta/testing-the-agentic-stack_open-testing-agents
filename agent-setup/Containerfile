@@ -13,9 +13,12 @@ ENV PATH="${ELAN_HOME}/bin:${PATH}"
 RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf \
     | sh -s -- -y --default-toolchain leanprover/lean4:v4.23.0
 
-# crewai + postgres client
+# crewai + postgres client.
+# litellm is required: the crew JSONs point at the local model via the
+# LiteLLM "openai/<model>" route (OPENAI_API_BASE), and crewai >= 1.15
+# moved litellm into an extra.
 RUN pip install --no-cache-dir \
-      "crewai[tools]>=1.15.20,<2.0.0" \
+      "crewai[tools,litellm]>=1.15.20,<2.0.0" \
       "psycopg[binary]>=3.2"
 
 # bake the formal harness into the image (repo stays read-only at runtime)
