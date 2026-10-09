@@ -1,31 +1,53 @@
 #!/usr/bin/env python3
-"""Interactive terminal CLI for the *test manager* agent.
+"""Interactive terminal console for the *test manager* agent (and controller).
 
 Talks to the self-hosted model (OpenAI-compatible /v1, llama.cpp) using the
-test manager persona compiled from `.dhall/test_manager_agent.dhall`, and
-persists transcripts in the local PostgreSQL store when reachable.
+test manager persona compiled from `.dhall/test_manager_agent.dhall`, and drives
+the other agents through the MCP knowledge/control bus (worker/mcp_server.py):
 
-Intended to feel like working with an agent in a terminal (opencode-style):
-streamed answers, slash commands, session history.
+  * assign a test case to the e2e tester and/or pentester      (/case)
+  * start/stop the agent services and read their state         (/start /stop /agents)
+  * read the shared findings and task queue                    (/findings /tasks)
+  * show / publish the live testing-process document           (/process /publish)
+  * request the latest results from the Odysseus Notes panel   (/notes)
+  * push a test-results note into the Odysseus web UI          (/note)
+  * mail the latest report through the Odysseus mail function  (/mail)
+
+Live bus state is injected into the model context on every turn, so ordinary
+questions like "how far along is the security test?" are answered with the real
+task queue and agent state.
 
 Usage:
   ./worker/tm_cli.py                       # interactive REPL
-  ./worker/tm_cli.py --once "how are the last test results"   # single query
+  ./worker/tm_cli.py --once "how are the last test results"
+  ./worker/tm_cli.py --once "/case both test the login for sqli and xss"
   ./worker/tm_cli.py --model-url http://127.0.0.1:18080/v1
 
 Slash commands:
-  /help      show this help
-  /status    model + postgres connectivity
-  /save      persist the current transcript to postgres (collection tm_cli)
-  /latest    print the most recent stored report (from the agents or this CLI)
-  /clear     reset the conversation (the test-manager persona stays)
-  /exit      quit (Ctrl+D / Ctrl+C works too)
+  /help              show this help
+  /status            model + postgres + MCP bus connectivity
+  /case <role> <tc>  assign a test case (role: e2e|pentester|both|all)
+  /agents            agent service state (systemd user units)
+  /start [role]      start the agent service(s) (default all)
+  /stop [role]       stop the agent service(s) (default all)
+  /tasks [role]      list assigned test-case tasks
+  /findings [role]   read the findings the agents shared
+  /process           show the live testing-process markdown
+  /publish           publish the process document to Odysseus
+  /notes [label]     request the note(s) on the Odysseus Notes panel (test results)
+  /note <title> <..> publish a note to the Odysseus web UI (label test-results)
+  /mail [to]         mail the latest test report via the Odysseus mail function
+  /save              persist the current transcript to postgres (collection tm_cli)
+  /latest            print the most recent stored report (from the agents or this CLI)
+  /clear             reset the conversation (the test-manager persona stays)
+  /exit              quit (Ctrl+D / Ctrl+C works too)
 
 Env vars honoured (defaults in parentheses):
   MODEL_URL        base of the OpenAI-compatible API (http://127.0.0.1:18080/v1,
-                   the shared phi-4-mini instance that serves both the crews
-                   and this CLI)
+                   the shared phi-4-mini instance that serves the crews and
+                   this CLI)
   MODEL_NAME       model alias as served by llama-server (phi-4-mini)
+  MCP_URL          MCP bus endpoint (http://127.0.0.1:8765/mcp)
   POSTGRES_DSN     full postgres DSN; else read from
                    /var/spool/aigents/database/secrets/credentials.env
 """
@@ -42,21 +64,37 @@ REPO = Path(__file__).resolve().parent.parent
 AGENT_JSON = REPO / "build" / "agents" / "test_manager_agent.json"
 DEFAULT_CREDENTIALS = Path("/var/spool/aigents/database/secrets/credentials.env")
 
+# MCP bus client (worker/mcp_bus.py sits next to this file); stdlib-only.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import mcp_bus
+except Exception:  # pragma: no cover - bus is optional
+    mcp_bus = None
+
+MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8765/mcp")
+
 # Defaults mirror .dhall/test_manager_agent.dhall, used when the dhall->json
 # artifact has not been compiled (run `nix develop -c just` to produce it).
 FALLBACK_PERSONA = {
     "role": "test manager",
     "goal": (
-        "coordinate and review all testing activities, verify coverage and "
-        "quality, track the progress of the e2e and pentester agents (each "
-        "role writes previous_output.md for the next one), and produce a final "
-        "consolidated report of end-to-end and security test results"
+        "act as the test manager and controller for the fixed OWASP Juice Shop "
+        "SUT: take the test case the user gives and assign it to the e2e tester "
+        "and/or the pentester over the MCP bus, start and track those agents, "
+        "read the findings they share, monitor their state and dispatched tasks "
+        "and dispatch follow-ups when coverage is missing, verify coverage and "
+        "quality, and produce a final consolidated report of end-to-end and "
+        "security results, published to Odysseus and mailed to the report "
+        "recipients through the Odysseus mail function"
     ),
     "backstory": (
         "an experienced test manager with a track record of running end-to-end "
-        "and security testing programs across large web applications"
+        "and security testing programs across large web applications; you "
+        "control the other agents through the MCP knowledge bus, monitor their "
+        "state and dispatched test cases, and shape the final markdown report "
+        "that is published to Odysseus and mailed to the report recipients"
     ),
-    "tools": ["FileReadTool", "FileWriterTool"],
+    "tools": ["FileReadTool", "FileWriterTool", "custom:aigents_bus"],
 }
 
 CYAN = "\033[36m"
@@ -81,15 +119,21 @@ def load_persona(path: Path) -> dict:
 def system_prompt(persona: dict, model_name: str) -> str:
     tools = ", ".join(persona.get("tools", []))
     return (
-        f"You are the {persona.get('role', 'test manager')} agent of the "
-        "open-testing-agents stack, served by the local model "
+        f"You are the {persona.get('role', 'test manager')} agent and controller "
+        "of the open-testing-agents stack, served by the local model "
         f"{model_name}.\n"
         f"Goal: {persona.get('goal', '')}\n"
         f"Backstory: {persona.get('backstory', '')}\n"
         f"Tools available: {tools}\n"
-        "Answer as the test manager: coordinate, review and report on testing "
-        "activities. Produce markdown reports when the user asks for a report, "
-        "and keep answers actionable."
+        "The one system under test is the OWASP Juice Shop at "
+        f"{os.environ.get('TARGET_URL', 'http://127.0.0.1:8080')}.\n"
+        "You control the e2e tester and the pentester through the MCP bus "
+        "(custom:aigents_bus): assign them a test case, read their findings, "
+        "monitor their state and dispatched tasks, and dispatch follow-ups when "
+        "coverage is missing. Answer as the test manager: coordinate, review and "
+        "report on testing activities. Produce markdown reports when the user "
+        "asks for a report, send them as mail through the Odysseus mail function "
+        "when asked, and keep answers actionable."
     )
 
 
@@ -259,11 +303,44 @@ def read_dsn_from_env() -> None:
 
 HELP = f"""{BOLD}commands{CYAN}
   /help      {RESET}show this help
-{CYAN}  /status    {RESET}model + postgres connectivity
+{CYAN}  /status    {RESET}model + postgres + MCP bus connectivity
+{CYAN}  /case      {RESET}<role> <test case>  assign a test case (e2e|pentester|both|all)
+{CYAN}  /agents    {RESET}agent service state (systemd user units)
+{CYAN}  /start     {RESET}[role]  start the agent service(s) (default all)
+{CYAN}  /stop      {RESET}[role]  stop the agent service(s) (default all)
+{CYAN}  /tasks     {RESET}[role]  list assigned test-case tasks
+{CYAN}  /findings  {RESET}[role]  read the findings the agents shared
+{CYAN}  /process   {RESET}show the live testing-process markdown
+{CYAN}  /publish   {RESET}publish the process document to Odysseus
+{CYAN}  /notes     {RESET}[label]  request the note(s) on the Odysseus Notes panel (latest results)
+{CYAN}  /note      {RESET}<title> <text>  publish a note to the Odysseus web UI (label test-results)
 {CYAN}  /save      {RESET}persist the current transcript to postgres (collection tm_cli)
 {CYAN}  /latest    {RESET}print the most recent stored document (latest agent report or session)
 {CYAN}  /clear     {RESET}reset the conversation (test-manager persona stays)
 {CYAN}  /exit      {RESET}quit (Ctrl+D / Ctrl+C works too)"""
+
+
+def bus_context() -> str:
+    """Live MCP-bus state injected into the model so it can answer progress Qs."""
+    if mcp_bus is None:
+        return ""
+    try:
+        status = mcp_bus.get_agent_status()
+        tasks = mcp_bus.list_tasks(limit=8)
+        findings = mcp_bus.get_findings(limit=3)
+    except Exception as exc:  # noqa: BLE001
+        return f"MCP bus unavailable at {MCP_URL}: {exc}"
+    text = (
+        "Live state from the MCP bus (use it to answer questions about progress "
+        "and to decide what to assign next):\n\n"
+        f"Agents:\n{status}\n\nTest-case tasks:\n{tasks}\n\n"
+        f"Recent shared findings:\n{findings}"
+    )
+    return text[:3000]
+
+
+def bus_ready() -> bool:
+    return mcp_bus is not None and mcp_bus.available()
 
 
 def print_assistant(text: str) -> None:
@@ -271,11 +348,12 @@ def print_assistant(text: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Test manager agent CLI")
-    parser.add_argument("--once", help="ask a single question and exit")
+    parser = argparse.ArgumentParser(description="Test manager agent CLI / controller")
+    parser.add_argument("--once", help="ask a single question (or run one /command) and exit")
     parser.add_argument("--model-url", default=os.environ.get(
         "MODEL_URL", "http://127.0.0.1:18080/v1"), help="OpenAI-compatible API base")
     parser.add_argument("--model-name", default=os.environ.get("MODEL_NAME", "phi-4-mini"))
+    parser.add_argument("--mcp-url", default=MCP_URL, help="MCP bus endpoint")
     parser.add_argument("--persona", default=str(AGENT_JSON), help="path to the agent JSON")
     parser.add_argument("--temp", type=float, default=0.2)
     parser.add_argument("--max-tokens", type=int, default=2048)
@@ -290,6 +368,14 @@ def main() -> int:
     messages = [{"role": "system", "content": system_prompt(persona, args.model_name)}]
 
     def ask(question: str, save: bool = False) -> None:
+        # Refresh the live bus state in the model context so progress questions
+        # ("what is the pentester doing?") are answered from real task/agent data.
+        ctx = bus_context()
+        if ctx:
+            if len(messages) > 1 and messages[1].get("role") == "system":
+                messages[1] = {"role": "system", "content": ctx}
+            else:
+                messages.insert(1, {"role": "system", "content": ctx})
         messages.append({"role": "user", "content": question})
         try:
             full = ""
@@ -305,36 +391,83 @@ def main() -> int:
         except KeyboardInterrupt:
             print(f"\n{DIM}stopped{RESET}")
 
-    if args.once:
-        ask(args.once)
-        return 0
-
-    ok, status = client.check()
-    print(f"{BOLD}test manager CLI{RESET}  model={args.model_name}  "
-          f"api={args.model_url}\n{DIM}persona: {persona.get('role')}{RESET}")
-    print(f"model: {status}")
-    print(f"store: {store.status()}")
-    print(HELP)
-    print()
-
-    while True:
+    def bus_call(name: str, **kwargs) -> None:
+        """Call an mcp_bus wrapper and print its text result (never raises)."""
+        if mcp_bus is None:
+            print(f"{YELLOW}MCP bus client unavailable (worker/mcp_bus.py not found){RESET}")
+            return
         try:
-            line = input(f"{CYAN}tm{DIM}@{RESET}{CYAN}aigents{DIM} > {RESET}").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not line:
-            continue
+            print(getattr(mcp_bus, name)(url=args.mcp_url, **kwargs))
+        except Exception as exc:  # noqa: BLE001
+            print(f"{RED}bus error: {exc}{RESET}")
 
+    def run_command(line: str) -> bool:
+        """Handle a /command; return True when the line was one."""
+        nonlocal messages
         cmd, _, rest = line.partition(" ")
-        if cmd == "/exit":
-            break
+        rest = rest.strip()
         if cmd == "/help":
             print(HELP)
         elif cmd == "/status":
             ok, status = client.check()
             print(f"model: {status}")
             print(f"store: {store.status()}")
+            print(f"bus:   {args.mcp_url} ({'reachable' if bus_ready() else 'unreachable'})")
+        elif cmd == "/case":
+            role, _, case = rest.partition(" ")
+            if not role or not case.strip():
+                print(f"{YELLOW}usage: /case <e2e|pentester|both|all> <test case>{RESET}")
+            else:
+                bus_call("assign_test_case", role=role, test_case=case.strip())
+        elif cmd == "/agents":
+            bus_call("get_agent_status")
+        elif cmd == "/start":
+            bus_call("start_agent", role=rest or "all")
+        elif cmd == "/stop":
+            bus_call("stop_agent", role=rest or "all")
+        elif cmd == "/tasks":
+            bus_call("list_tasks", role=rest, limit=20)
+        elif cmd == "/findings":
+            bus_call("get_findings", role=rest, limit=10)
+        elif cmd == "/process":
+            bus_call("get_process")
+        elif cmd == "/publish":
+            bus_call("publish_process")
+        elif cmd == "/notes":
+            bus_call("list_notes", label=rest, limit=50)
+        elif cmd == "/note":
+            title, _, body = rest.partition(" ")
+            if not title or not body.strip():
+                print(f"{YELLOW}usage: /note <title> <text> — publishes a note to Odysseus{RESET}")
+            else:
+                bus_call("publish_note", title=title, content=body.strip(),
+                         label="test-results")
+        elif cmd == "/mail":
+            # Mail the latest test report via the Odysseus mail function.
+            # `to` defaults to REPORT_MAIL_TO (env or odysseus creds). Prefer the
+            # full testing-process markdown (the Notes list truncates content);
+            # fall back to the manager's test-results note.
+            to = rest.strip()
+            subject = f"Test report: {os.environ.get('TARGET_URL', 'aigents SUT')}"
+            body = ""
+            if mcp_bus is not None:
+                try:
+                    body = mcp_bus.get_process()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"{RED}bus error while reading the process: {exc}{RESET}")
+            if not body.strip() and mcp_bus is not None:
+                try:
+                    notes = mcp_bus.list_notes(label="test-results", limit=100)
+                    for block in notes.split("\n\n### "):
+                        if block.strip().startswith("Test results: manager"):
+                            body = block.split("\n\n", 1)[1].strip() if "\n\n" in block else ""
+                            break
+                except Exception as exc:  # noqa: BLE001
+                    print(f"{RED}bus error while reading notes: {exc}{RESET}")
+            if not body.strip():
+                print(f"{YELLOW}no report to mail yet — run /case and let the agents finish first{RESET}")
+            else:
+                bus_call("mail_report", to=to, subject=subject, body=body)
         elif cmd == "/save":
             if not store.available():
                 print(f"{YELLOW}postgres not available; transcript not stored{RESET}")
@@ -346,6 +479,34 @@ def main() -> int:
             messages = [messages[0]]
             print("conversation reset")
         else:
+            return False
+        return True
+
+    if args.once:
+        if not run_command(args.once):
+            ask(args.once)
+        return 0
+
+    ok, status = client.check()
+    print(f"{BOLD}test manager console{RESET}  model={args.model_name}  "
+          f"api={args.model_url}\n{DIM}persona: {persona.get('role')}{RESET}")
+    print(f"model: {status}")
+    print(f"store: {store.status()}")
+    print(f"bus:   {args.mcp_url} ({'reachable' if bus_ready() else 'unreachable'})")
+    print(HELP)
+    print()
+
+    while True:
+        try:
+            line = input(f"{CYAN}tm{DIM}@{RESET}{CYAN}aigents{DIM} > {RESET}").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not line:
+            continue
+        if line == "/exit":
+            break
+        if not run_command(line):
             ask(line)
 
     return 0

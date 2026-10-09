@@ -2,7 +2,8 @@
 
 OpenTofu for the **testing agents** themselves: they now run **locally** on the
 same server, each as a Podman Quadlet service — no MQTT, no Raspberry Pis. Each
-agent connects **directly** to the local model (`phi-4-mini` via llama.cpp) and
+agent connects **directly** to the local model stack (`phi-4-mini` primary on
+`18080`, `phi-mini-moe` fast helper on `18081`) and
 to the local **PostgreSQL + pgvector** store.
 
 The model + database stack is managed by `../model-setup` as a podman-compose

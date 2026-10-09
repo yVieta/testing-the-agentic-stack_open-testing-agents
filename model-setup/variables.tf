@@ -31,8 +31,14 @@ variable "bind_address" {
 
 variable "expose_public" {
   type        = bool
-  description = "When true, opens the published TCP ports with sudo/iptables so they are reachable from outside the host. Needs passwordless sudo; leave false otherwise."
+  description = "When true, opens the TCP ports in `expose_ports` with sudo/iptables so they are reachable from outside the host. Needs passwordless sudo; leave false otherwise."
   default     = false
+}
+
+variable "expose_ports" {
+  type        = list(number)
+  description = "Host ports the firewall is opened for when `expose_public = true`. Defaults to this module's own published ports (primary model, secondary model, postgres). Extend it with the other modules' host ports to expose the whole stack from one place — e.g. [18080, 18081, 15432, 8080, 3000, 3001, 7000, 8888, 8100, 8091, 8765] — and set each module's bind_address/mcp_host to 0.0.0.0 so those ports listen on all interfaces. See README.md for the table."
+  default     = []
 }
 
 variable "sudo_command" {
@@ -54,15 +60,23 @@ variable "model_image" {
   default     = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 }
 
+# --- primary model (the agents' brain) ---------------------------------------
+# Phi-4-mini is the better model for the agent results: a 3.8B dense model with
+# a 128K training context and native tool calling, both of which CrewAI relies
+# on. Phi-mini-MoE's 4096-token window would truncate skills, tool output and
+# shared findings, and its GGUF chat template has no tool-calling support, so it
+# is not used as the primary agent model (see the secondary model below, where it
+# supports the primary instead).
+
 variable "model_repo" {
   type        = string
-  description = "Hugging Face repository holding the GGUF build of Phi-4 mini."
+  description = "Hugging Face repository holding the GGUF build of the primary model (Phi-4-mini)."
   default     = "unsloth/Phi-4-mini-instruct-GGUF"
 }
 
 variable "model_file" {
   type        = string
-  description = "GGUF file inside model_repo. Q4_K_M of the 3.8B mini model is ~2.5 GB and fits the 16 GB RAM budget comfortably."
+  description = "GGUF file inside model_repo. Q4_K_M of the 3.8B primary model is ~2.5 GB and fits the 12 GB GPU budget comfortably."
   default     = "Phi-4-mini-instruct-Q4_K_M.gguf"
 }
 
@@ -74,13 +88,13 @@ variable "model_sha256" {
 
 variable "model_alias" {
   type        = string
-  description = "Model name reported by the OpenAI-compatible /v1/models endpoint."
+  description = "Model name reported by the primary model's /v1/models endpoint."
   default     = "phi-4-mini"
 }
 
 variable "model_context_size" {
   type        = number
-  description = "Total KV-cache context (llama.cpp --ctx-size). llama-server splits this across --parallel slots, so each request gets model_context_size / model_parallel_slots tokens (default 65536 / 4 = 16384 per slot). Sized to fit one phi-4-mini + its KV in the 12 GB GPU alongside everything else."
+  description = "Total KV-cache context (llama.cpp --ctx-size) for the primary model. llama-server splits this across --parallel slots, so each request gets model_context_size / model_parallel_slots tokens (default 65536 / 4 = 16384 per slot). Phi-4-mini trains on 128K; this keeps one phi-4-mini + its KV cache inside the 12 GB GPU."
   default     = 65536
 }
 
@@ -92,19 +106,85 @@ variable "model_threads" {
 
 variable "model_parallel_slots" {
   type        = number
-  description = "Concurrent request slots on the single phi-4-mini server. Each slot multiplies the KV cache; 4 lets the three crews overlap with the interactive CLI/Odysseus chat."
+  description = "Concurrent request slots on the single primary server. Each slot multiplies the KV cache; 4 lets the three crews overlap with the interactive CLI/Odysseus chat."
   default     = 4
 }
 
 variable "model_gpu_layers" {
   type        = number
-  description = "Layers offloaded to VRAM. 0 runs pure CPU. 99 offloads every phi-4-mini layer to the NVIDIA GPU (RTX 3060, CDI device nvidia.com/gpu=all). The single instance serves crews + interactive chat."
+  description = "Layers of the primary model offloaded to VRAM. 0 runs pure CPU. 99 offloads every phi-4-mini layer to the NVIDIA GPU (RTX 3060, CDI device nvidia.com/gpu=all)."
   default     = 99
 }
 
 variable "model_kv_cache_type" {
   type        = string
   description = "Quantization used for the K and V KV cache (q8_0 halves it versus f16)."
+  default     = "q8_0"
+}
+
+# --- secondary (fast) model ---------------------------------------------------
+# Phi-mini-MoE supports the primary: a fast 7.6B / 2.4B-active MoE used for
+# short, high-volume generations such as condensing the shared findings before
+# they enter the primary's context. It is optional — when disabled or
+# unreachable the agents fall back to the primary model alone.
+
+variable "secondary_model_enabled" {
+  type        = bool
+  description = "Run the secondary fast model (Phi-mini-MoE) alongside the primary. When false only the primary model is served and the worker's condense step is skipped."
+  default     = true
+}
+
+variable "secondary_model_repo" {
+  type        = string
+  description = "Hugging Face repository holding the GGUF build of the secondary (fast) model."
+  default     = "smarttasks/Phi-mini-MoE-instruct-GGUF"
+}
+
+variable "secondary_model_file" {
+  type        = string
+  description = "GGUF file inside secondary_model_repo. Q4_K_M of the 7.6B MoE (2.4B active) is ~5 GB."
+  default     = "Phi-mini-MoE-instruct-Q4_K_M.gguf"
+}
+
+variable "secondary_model_sha256" {
+  type        = string
+  description = "Optional expected SHA-256 of secondary_model_file. The fetch step verifies it when set."
+  default     = "0e81179712790f9b16e6ad4216acfb5af2a4711093b1176db62b86d5a1db868f"
+}
+
+variable "secondary_model_alias" {
+  type        = string
+  description = "Model name reported by the secondary model's /v1/models endpoint."
+  default     = "phi-mini-moe"
+}
+
+variable "secondary_model_port" {
+  type        = number
+  description = "Host port published for the secondary model's OpenAI-compatible API."
+  default     = 18081
+}
+
+variable "secondary_model_context_size" {
+  type        = number
+  description = "Total KV-cache context for the secondary model. Phi-mini-MoE's native max_position_embeddings is 4096; 8192 gives 2 slots x 4096."
+  default     = 8192
+}
+
+variable "secondary_model_parallel_slots" {
+  type        = number
+  description = "Concurrent request slots on the secondary model (8192 ctx / 2 slots = 4096 per slot)."
+  default     = 2
+}
+
+variable "secondary_model_gpu_layers" {
+  type        = number
+  description = "Layers of the secondary model offloaded to VRAM. Default 0 (CPU) so it never competes with the primary for the 12 GB GPU; raise it when VRAM allows and you want the fast model to be faster."
+  default     = 0
+}
+
+variable "secondary_model_kv_cache_type" {
+  type        = string
+  description = "KV-cache quantization for the secondary model."
   default     = "q8_0"
 }
 
@@ -162,7 +242,7 @@ variable "postgres_password" {
 
 variable "embedding_dimensions" {
   type        = number
-  description = "Dimensionality of the embeddings stored in pgvector. Matches phi-4-mini's hidden size (3072)."
+  description = "Dimensionality of the embeddings stored in pgvector. Matches the primary model's (Phi-4-mini) hidden size (3072)."
   default     = 3072
 }
 

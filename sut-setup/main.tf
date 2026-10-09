@@ -101,7 +101,11 @@ resource "null_resource" "start_services" {
       for s in juice-shop grafana nginx-proxy; do
         systemctl --user stop "$s.service" 2>/dev/null || true
       done
-      ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
+      if [ "${var.enable_on_boot}" = "true" ]; then
+        ln -sf "$XDG_RUNTIME_DIR/systemd/generator/sut-pod.service" "$wants/"
+      else
+        rm -f "$wants/sut-pod.service"
+      fi
       loginctl enable-linger "$user" 2>/dev/null || true
       systemctl --user restart sut-pod.service
     EOT

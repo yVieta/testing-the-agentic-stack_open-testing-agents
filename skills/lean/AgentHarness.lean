@@ -3,15 +3,18 @@
 
 Lean 4 port of AgentHarness.agda. Built on the standard library (no axioms).
 - section 1: the crew roles and the chain between them (no MQTT; local files)
+- section 1b: the single system under test (SUT) every role is scoped to
 - section 2: action boundaries + tool pre-conditions
 - section 3: worker state transitions
 - section 4: tuning parameters + per-role safety envelope (WellTuned r t)
 - section 5: the tuning loop (safe widening/more-step lemmas, role-bounded)
-- section 6: verification feedback (review : Role → Tuning → Verdict)
+- section 6: verification feedback (reviewOn : SUT → Role → Tuning → Verdict)
 
 Worker usage (worker/run_agent.py):
-    lake env lean --run Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost
+    lake env lean --run Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost [sut_url]
     (role ∈ { e2e, pentester, manager })
+The optional sut_url must match the deployed SUT (juiceShop); a run against any
+other target is rejected, so every agent is provably scoped to the one service.
 -/
 
 namespace AgentHarness
@@ -22,7 +25,43 @@ inductive Role : Type where
   | e2e       : Role  -- pi1-e2e
   | pentester : Role  -- pi2-pentester
   | manager   : Role  -- pi3-manager
-  deriving Repr
+  deriving Repr, DecidableEq
+
+/-! 1b. The single system under test every role is scoped to -/
+
+/-- The service the agents are authorised to exercise. This stack deploys exactly
+    one: OWASP Juice Shop behind the nginx proxy on :8080. -/
+structure SUT : Type where
+  name : String
+  url  : String
+  deriving Repr, DecidableEq
+
+/-- The SUT shipped and set by this stack. -/
+def juiceShop : SUT :=
+  { name := "OWASP Juice Shop", url := "http://127.0.0.1:8080" }
+
+/-- Every role focuses on the same, clearly set SUT: there is no per-role target
+    to drift to. -/
+def focus : Role → SUT
+  | _ => juiceShop
+
+/-- A role is scoped to the deployed SUT when it points at that service's URL:
+    the target is the *service*, not its label. -/
+def Scoped (r : Role) (sut : SUT) : Prop := sut.url = (focus r).url
+
+/-- `Scoped` is decidable (string equality), so it can guard the `reviewOn` test. -/
+instance (r : Role) (sut : SUT) : Decidable (Scoped r sut) :=
+  inferInstanceAs (Decidable (sut.url = (focus r).url))
+
+/-- All agents focus on the same, clearly set SUT. -/
+theorem all_roles_same_sut (r₁ r₂ : Role) : focus r₁ = focus r₂ := rfl
+
+/-- Scoping to the deployed SUT is exactly pointing at Juice Shop's URL. -/
+theorem scoped_iff_juice (r : Role) (sut : SUT) :
+    Scoped r sut ↔ sut.url = juiceShop.url := Iff.rfl
+
+/-- Each role is (trivially) scoped to the deployed SUT. -/
+theorem scoped_juice_shop (r : Role) : Scoped r juiceShop := rfl
 
 inductive Topic : Type where
   | crew_start            : Topic  -- crew/start
@@ -377,23 +416,55 @@ theorem proposal_accepted : ∀ r : Role, WellTuned r (proposal r) := by
   · exact Nat.le_refl _
   · exact Nat.le_refl _
 
-/-! 6. Feedback (role-aware) -/
+/-! 6. Feedback (role-aware, SUT-scoped) -/
 
 inductive Verdict : Type where
   | accepted : Verdict
   | rejected : Verdict
   deriving Repr, DecidableEq
 
-def review (r : Role) (t : Tuning) : Verdict :=
-  if (WellTuned r t) then Verdict.accepted else Verdict.rejected
+/-- A role is harnessed only when the run is scoped to the deployed SUT *and*
+    its tuning fits that role's `WellTuned` envelope. -/
+structure Harnessed (r : Role) (sut : SUT) (t : Tuning) : Prop where
+  on_target : Scoped r sut
+  tuned     : WellTuned r t
+
+/-- The full verdict: accept only on-target runs whose tuning is role-safe. -/
+def reviewOn (sut : SUT) (r : Role) (t : Tuning) : Verdict :=
+  if Scoped r sut ∧ WellTuned r t then Verdict.accepted else Verdict.rejected
+
+/-- Review against the deployed SUT (the common case). -/
+def review (r : Role) (t : Tuning) : Verdict := reviewOn juiceShop r t
+
+theorem reviewOn_accepted_iff (sut : SUT) (r : Role) (t : Tuning) :
+    reviewOn sut r t = Verdict.accepted ↔ Scoped r sut ∧ WellTuned r t := by
+  unfold reviewOn Scoped
+  by_cases h : sut.url = (focus r).url ∧ WellTuned r t <;> simp [h]
+
+/-- An accepted verdict *is* a `Harnessed` proof: scoped to the SUT and tuned. -/
+theorem accepted_is_harnessed {sut : SUT} {r : Role} {t : Tuning}
+    (h : reviewOn sut r t = Verdict.accepted) : Harnessed r sut t := by
+  rw [reviewOn_accepted_iff] at h
+  exact ⟨h.1, h.2⟩
+
+/-- A run pointed at any SUT other than the deployed one is rejected, however
+    well tuned: the agents cannot be redirected off the set target. -/
+theorem off_target_rejected (sut : SUT) (r : Role) (t : Tuning)
+    (h : sut.url ≠ juiceShop.url) : reviewOn sut r t = Verdict.rejected := by
+  have hfocus : ¬ Scoped r sut := by
+    intro hs
+    exact h hs
+  unfold reviewOn
+  simp [hfocus]
 
 structure Feedback : Type where
+  sut     : SUT
   role    : Role
   verdict : Verdict
   params  : Tuning
   deriving Repr
 
-theorem defaults_verdict : ∀ r : Role, review r (defaults r) = Verdict.accepted := by
+theorem defaults_verdict : ∀ r : Role, reviewOn juiceShop r (defaults r) = Verdict.accepted := by
   intro r
   cases r <;> native_decide
 

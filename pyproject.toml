@@ -1,7 +1,7 @@
 [project]
 name = "aigents"
 version = "0.3.0"
-description = "testing agents running as local Quadlet services against a self-hosted phi-4-mini model + PostgreSQL/pgvector store"
+description = "testing agents running as local Quadlet services against self-hosted llama.cpp models (phi-4-mini primary + phi-mini-moe fast) + PostgreSQL/pgvector store"
 authors = [{ name = "Vieta", email = "vieta@uber.space" }]
 requires-python = ">=3.10,<3.14"
 dependencies = [

@@ -30,14 +30,32 @@ variable "model_url" {
 
 variable "model_name" {
   type        = string
-  description = "Model name as served by llama-server --alias."
+  description = "Model name (alias) as served by llama-server on `model_url`. The primary phi-4-mini instance."
   default     = "phi-4-mini"
+}
+
+variable "model_fast_url" {
+  type        = string
+  description = "Base URL of the secondary fast model (phi-mini-moe). The worker uses it to condense shared findings before they enter the primary's context; empty/unreachable disables the condense step."
+  default     = "http://127.0.0.1:18081"
+}
+
+variable "model_fast_name" {
+  type        = string
+  description = "Model name (alias) as served by llama-server on `model_fast_url`."
+  default     = "phi-mini-moe"
 }
 
 variable "target_url" {
   type        = string
   description = "System under test the agents exercise: the OWASP Juice Shop behind the nginx proxy of the rootless SUT on 127.0.0.1."
   default     = "http://127.0.0.1:8080"
+}
+
+variable "mcp_url" {
+  type        = string
+  description = "MCP endpoint of the knowledge/control bus (mcp-setup) that the worker uses to pull its assigned test case, read the other roles' findings and publish its own."
+  default     = "http://127.0.0.1:8765/mcp"
 }
 
 variable "agent_image" {
@@ -86,9 +104,15 @@ variable "enable_linger" {
   default     = true
 }
 
+variable "enable_on_boot" {
+  type        = bool
+  description = "Enable the agent units in the user's default.target so they start automatically at boot/login. Default false: services are started now but not enabled, so start them explicitly (systemctl --user start agent-<role>.service, or ./start-services.sh)."
+  default     = false
+}
+
 variable "service_state" {
   type        = string
-  description = "Desired state of the agent quadlet services: 'running' enables+starts them, 'stopped' disables+stops them. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  description = "Desired state of the agent quadlet services: 'running' starts them (enabled for boot only when enable_on_boot=true), 'stopped' disables+stops them. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
   default     = "running"
 
   validation {

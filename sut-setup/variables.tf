@@ -72,9 +72,15 @@ variable "grafana_admin_password" {
   default   = "admin"
 }
 
+variable "enable_on_boot" {
+  type        = bool
+  description = "Link the SUT pod into the user's default.target so it starts automatically at boot/login. Default false: the pod is started now but not linked, so start it explicitly (systemctl --user start sut-pod.service, or ./start-services.sh)."
+  default     = false
+}
+
 variable "service_state" {
   type        = string
-  description = "Desired state of the SUT services: 'running' starts the pod, 'stopped' stops it and removes it from the user's default.target. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  description = "Desired state of the SUT services: 'running' starts the pod (linked for boot only when enable_on_boot=true), 'stopped' stops it and removes it from the user's default.target. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
   default     = "running"
 
   validation {

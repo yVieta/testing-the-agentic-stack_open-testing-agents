@@ -4,12 +4,14 @@ import AgentHarness
 # Main.lean - role-aware tuning check CLI.
 
 Reads a role name and five tuning parameters from the command line and prints
-the `AgentHarness.review` verdict for them under that role's safety envelope:
+the `AgentHarness.reviewOn` verdict for them under that role's safety envelope:
 
-    lake env lean --run Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost
+    lake env lean --run Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost [sut_url]
 
-Roles: e2e | pentester | manager. Used by worker/run_agent.py to validate a
-tuning proposal before it is applied (the safety obligations live in
+Roles: e2e | pentester | manager. The optional `sut_url` must match the deployed
+SUT (`AgentHarness.juiceShop`); any other target is rejected, so a run is only
+accepted against the one clearly set service. Used by worker/run_agent.py to
+validate a tuning proposal before it is applied (the safety obligations live in
 AgentHarness.lean).
 -/
 
@@ -27,6 +29,13 @@ def toTuningNat (s : String) : Nat :=
   | some n => n
   | none   => 0
 
+-- Print the review verdict for a role/tuning against a specific SUT.
+def decide (role : AgentHarness.Role) (t : AgentHarness.Tuning)
+    (sut : AgentHarness.SUT) : IO Unit :=
+  match AgentHarness.reviewOn sut role t with
+  | AgentHarness.Verdict.accepted => IO.println "accepted"
+  | AgentHarness.Verdict.rejected => IO.println "rejected"
+
 def main (args : List String) : IO Unit :=
   match args with
   | [r, q, d, c, s, k] =>
@@ -35,8 +44,14 @@ def main (args : List String) : IO Unit :=
       let t : AgentHarness.Tuning :=
         { queue_size := toTuningNat q, dedupe_cap := toTuningNat d
         , crew_timeout := toTuningNat c, steps := toTuningNat s, step_cost := toTuningNat k }
-      match AgentHarness.review role t with
-      | AgentHarness.Verdict.accepted => IO.println "accepted"
-      | AgentHarness.Verdict.rejected => IO.println "rejected"
+      decide role t AgentHarness.juiceShop
     | none => IO.println s!"unknown-role: {r}"
-  | _ => IO.println "usage: Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost"
+  | [r, q, d, c, s, k, u] =>
+    match parseRole r with
+    | some role =>
+      let t : AgentHarness.Tuning :=
+        { queue_size := toTuningNat q, dedupe_cap := toTuningNat d
+        , crew_timeout := toTuningNat c, steps := toTuningNat s, step_cost := toTuningNat k }
+      decide role t { name := "SUT", url := u }
+    | none => IO.println s!"unknown-role: {r}"
+  | _ => IO.println "usage: Main.lean <role> queue_size dedupe_cap crew_timeout steps step_cost [sut_url]"

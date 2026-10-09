@@ -4,17 +4,27 @@ import json
 import sys
 import http.client
 
+PIN_FAST = "phi-mini-moe"  # secondary fast model (default port 18081)
+PIN_MAIN = "phi-4-mini"    # primary model (default port 18080)
+
 def main():
-    parser = argparse.ArgumentParser(description='Interact with local phi-4-mini model')
+    parser = argparse.ArgumentParser(
+        description='Interact with the local models (phi-4-mini primary, phi-mini-moe fast)')
     parser.add_argument('prompt', nargs='*', help='Prompt to send')
     parser.add_argument('--system', '-s', default='', help='System message')
     parser.add_argument('--temp', type=float, default=0.2, help='Temperature')
     parser.add_argument('--max-tokens', type=int, default=256, help='Max tokens')
     parser.add_argument('--host', default='127.0.0.1', help='Model host')
     parser.add_argument('--port', type=int, default=18080, help='Model port')
-    parser.add_argument('--model', default='phi-4-mini', help='Model name')
+    parser.add_argument('--model', default=PIN_MAIN, help='Model name')
+    parser.add_argument('--fast', action='store_true',
+                        help='Talk to the fast phi-mini-moe instead (port 18081)')
     parser.add_argument('--interactive', '-i', action='store_true', help='Interactive chat mode')
     args = parser.parse_args()
+
+    if args.fast:
+        args.model = PIN_FAST
+        args.port = 18081
 
     if args.interactive:
         print(f'Interactive chat with {args.model} at {args.host}:{args.port} (Ctrl+C to exit)')

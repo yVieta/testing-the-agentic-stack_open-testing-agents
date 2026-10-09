@@ -24,13 +24,14 @@ output "service_urls" {
 }
 
 output "model_wiring" {
-  description = "How Odysseus reaches the single local phi-4-mini instance."
+  description = "How Odysseus reaches the two local llama.cpp instances."
   value = {
     primary       = var.llm_host
-    secondary     = var.llm_hosts
+    secondary     = local.llm_hosts_value
+    fast_host     = var.llm_fast_host
     research_base = var.research_llm_endpoint
     embedding     = var.embedding_endpoint == "" ? "built-in fastembed (all-MiniLM-L6-v2)" : var.embedding_endpoint
-    note          = "app runs with Network=host and talks to the single model on the loopback (18080)"
+    note          = "app runs with Network=host and talks to phi-4-mini (:18080, primary) and phi-mini-moe (:18081, fast) on the loopback"
   }
 }
 

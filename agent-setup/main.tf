@@ -61,7 +61,10 @@ resource "local_file" "agent_quadlet" {
     agent_role           = each.value # manifest agent name
     model_url            = var.model_url
     model_name           = var.model_name
+    model_fast_url       = var.model_fast_url
+    model_fast_name      = var.model_fast_name
     target_url           = var.target_url
+    mcp_url              = var.mcp_url
     credential_file      = local.credential_file
     odysseus_secrets_dir = local.odysseus_secrets_dir
   })
@@ -85,6 +88,8 @@ resource "null_resource" "start_agents" {
     harness     = filesha256("${local.repo_dir}/skills/lean/Main.lean")
     harness_lib = filesha256("${local.repo_dir}/skills/lean/AgentHarness.lean")
     worker      = filesha256("${local.repo_dir}/worker/run_agent.py")
+    mcp_bus     = filesha256("${local.repo_dir}/worker/mcp_bus.py")
+    crew_tool   = filesha256("${local.repo_dir}/worker/crew_tools/aigents_bus.py")
   }
 
   provisioner "local-exec" {
@@ -103,7 +108,9 @@ resource "null_resource" "start_agents" {
         loginctl enable-linger "$user" || true
       fi
       for role in ${join(" ", sort(keys(var.roles)))}; do
-        systemctl --user enable --now "agent-$${role}.service" 2>/dev/null || true
+        if [ "${var.enable_on_boot}" = "true" ]; then
+          systemctl --user enable "agent-$${role}.service" 2>/dev/null || true
+        fi
         systemctl --user restart "agent-$${role}.service" 2>/dev/null || true
       done
     EOT

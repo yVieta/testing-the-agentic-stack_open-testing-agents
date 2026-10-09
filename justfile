@@ -55,6 +55,24 @@ shell:
 tm:
     nix develop -c python3 worker/tm_cli.py
 
+# Compile the crews + agent persona, then start every service (model, SUT,
+# MCP bus, agents, Odysseus). Run as `nix develop -c just start` so
+# dhall-to-json is on PATH for the `crews` step.
+start: crews
+    ./start-services.sh
+
+# Stop every service in reverse order (Odysseus -> agents -> SUT -> model).
+stop:
+    ./stop-services.sh
+
+# Stop then start everything.
+restart:
+    ./start-services.sh restart
+
+# Show the tofu outputs (service URLs / state) for each module.
+status:
+    ./start-services.sh status
+
 # Remove build/.
 clean:
     @rm -rf "{{ build_dir }}"

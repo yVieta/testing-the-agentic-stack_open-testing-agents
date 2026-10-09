@@ -8,8 +8,9 @@ Requires=odysseus-searxng.service odysseus-chromadb.service
 Image=${app_image}
 ContainerName=odysseus-app
 # Host networking: the rootless container cannot reach host-loopback services
-# (the single phi-4-mini instance, SearXNG, ChromaDB) through pasta's gateway,
-# so the app shares the host net and talks to them on 127.0.0.1 directly.
+# (the phi-4-mini / phi-mini-moe model instances, SearXNG, ChromaDB) through
+# pasta's gateway, so the app shares the host net and talks to them on
+# 127.0.0.1 directly.
 Network=host
 Volume=${odysseus_dir}/data:/app/data:z
 Volume=${odysseus_dir}/logs:/app/logs:z
@@ -31,6 +32,18 @@ Environment=ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
 Environment=PUID=${puid}
 Environment=PGID=${pgid}
 Environment=FASTEMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
+# Mail function (report delivery). Empty values are harmless: Odysseus reports
+# "no SMTP-capable email account" until a mailbox is configured here or in the UI.
+Environment=SMTP_HOST=${smtp_host}
+Environment=SMTP_PORT=${smtp_port}
+Environment=SMTP_SECURITY=${smtp_security}
+Environment=SMTP_USER=${smtp_user}
+Environment=SMTP_PASSWORD=${smtp_password}
+Environment=IMAP_HOST=${imap_host}
+Environment=IMAP_PORT=${imap_port}
+Environment=IMAP_USER=${imap_user}
+Environment=IMAP_PASSWORD=${imap_password}
+Environment=EMAIL_FROM=${email_from}
 
 [Service]
 Restart=always

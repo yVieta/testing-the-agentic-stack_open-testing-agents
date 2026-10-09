@@ -1,5 +1,9 @@
 # Written by model-setup/terraform -> managed with podman-compose.
-# Database + AI model only; the testing agents live as local Quadlet units.
+# Database + AI models only; the testing agents live as local Quadlet units.
+#
+# Two llama.cpp servers share one model directory:
+#   phi-4-mini   primary brain  (:18080)  all crew/CLI/UI reasoning
+#   phi-mini-moe secondary fast (:18081)  condenses findings (optional)
 services:
   postgres:
     image: ${postgres_image}
@@ -22,9 +26,9 @@ services:
       retries: 12
     restart: always
 
-  phi4:
+  phi-4-mini:
     image: ${model_image}
-    container_name: aigents-phi4
+    container_name: aigents-phi-4-mini
     volumes:
       - ${model_dir}:/models:Z
     environment:
@@ -49,6 +53,35 @@ services:
       retries: 5
     restart: on-failure
 
+%{ if secondary_model_enabled ~}
+  phi-mini-moe:
+    image: ${model_image}
+    container_name: aigents-phi-mini-moe
+    volumes:
+      - ${model_dir}:/models:Z
+    environment:
+      LLAMA_CACHE: /models/.llama-cache
+      LLAMA_ARG_HOST: 0.0.0.0
+    command:
+%{ for arg in secondary_exec_args ~}
+      - "${arg}"
+%{ endfor ~}
+%{ if length(secondary_model_gpu_devices) > 0 ~}
+    devices:
+%{ for dev in secondary_model_gpu_devices ~}
+      - "${dev}"
+%{ endfor ~}
+%{ endif ~}
+    ports:
+      - "${bind_address}:${secondary_model_port}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: on-failure
+%{ endif ~}
+
   model-fetch:
     image: ${model_image}
     profiles: ["fetch"] # one-shot, started via `run --rm`
@@ -64,3 +97,21 @@ services:
       HF_TOKEN: ${hf_token}
     entrypoint: ["/bin/bash", "/opt/aigents/fetch-gguf.sh"]
     restart: "no"
+
+%{ if secondary_model_enabled ~}
+  model-fetch-secondary:
+    image: ${model_image}
+    profiles: ["fetch"] # one-shot, started via `run --rm`
+    volumes:
+      - ${model_dir}:/models:Z
+      - ${scripts_dir}:/opt/aigents:ro
+    environment:
+      MODEL_REPO: ${secondary_model_repo}
+      MODEL_FILE: ${secondary_model_file}
+      MODEL_DIR: /models
+      MODEL_SHA256: ${secondary_model_sha256}
+      HF_ENDPOINT: ${hf_endpoint}
+      HF_TOKEN: ${hf_token}
+    entrypoint: ["/bin/bash", "/opt/aigents/fetch-gguf.sh"]
+    restart: "no"
+%{ endif ~}

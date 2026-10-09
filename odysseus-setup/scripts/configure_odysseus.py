@@ -6,8 +6,8 @@ seed file (rendered from the module variables). It:
 
   1. waits for the app to become healthy,
   2. logs in as the admin (password read from the generated credentials.env),
-  3. registers the single phi-4-mini endpoint if missing and prunes stale model
-  4. endpoints that still point at the retired CLI-only instance (port 18081),
+  3. registers the primary (phi-4-mini :18080) and fast (phi-mini-moe :18081)
+  4. model endpoints if missing and prunes stale local model registrations,
   5. installs / activates the "Test Manager" character preset.
 
 Every step is a no-op when the object already exists, so re-running the tofu
@@ -109,11 +109,11 @@ def ensure_endpoints(client, endpoints):
         name = e.get("name")
         if url in desired and desired[url] == name:
             continue
-        # Prune stale model registrations on this host: 18081 was the retired
-        # CLI-only instance, 18080 duplicates are redundant with a single model,
-        # and a declared URL registered under an old name is recreated so the
-        # seed file stays the source of truth.
-        if "18081" in url or (":18080" in url and (url not in desired or desired[url] != name)):
+        # Prune stale local model registrations: 18080/18081 are this host's
+        # primary (phi-4-mini) and fast (phi-mini-moe) model ports. Any endpoint
+        # on them that is not declared in the seed file (or is declared under a
+        # different name) is removed so the seed file stays the source of truth.
+        if (":18080" in url or ":18081" in url) and (url not in desired or desired[url] != name):
             eid = e.get("id")
             if eid is None:
                 print(f"odysseus-seed: endpoint {name} -> {url} has no id; skipping",

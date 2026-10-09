@@ -2,8 +2,8 @@
 --
 -- Runs once, from the pgvector image's /docker-entrypoint-initdb.d hook, when the
 -- data directory is still empty. ${embedding_dimensions} matches the hidden size
--- of the Phi-4 embedding space, so vectors produced by the model container drop
--- straight into these tables.
+-- of the primary model's (Phi-4-mini) embedding space, so vectors produced by
+-- the model container drop straight into these tables.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 

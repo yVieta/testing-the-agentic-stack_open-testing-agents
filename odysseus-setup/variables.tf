@@ -78,19 +78,25 @@ variable "ntfy_port" {
 
 variable "llm_host" {
   type        = string
-  description = "Primary LLM host Odysseus scans for model discovery. Since the model stack now runs a single phi-4-mini on 18080 (crews + interactive chat), everything points at it. The app runs with host networking, so 127.0.0.1 is the host."
+  description = "Primary LLM host Odysseus scans for model discovery — the shared phi-4-mini on 18080 (crews + interactive chat). The app runs with host networking, so 127.0.0.1 is the host."
   default     = "127.0.0.1:18080"
 }
 
 variable "llm_hosts" {
   type        = string
-  description = "Additional comma-separated LLM hosts. The single phi-4-mini is on `llm_host`; this stays the same value because the app scans both env vars — harmless duplicate, set to \"\" if your build tolerates an empty secondary."
-  default     = "127.0.0.1:18080"
+  description = "Additional comma-separated LLM hosts. Empty (default) derives it from `llm_fast_host`, so both the primary and the fast model are advertised."
+  default     = ""
+}
+
+variable "llm_fast_host" {
+  type        = string
+  description = "Host:port of the secondary fast model (phi-mini-moe, default 18081). Odysseus registers it as an extra OpenAI-compatible endpoint. Set to \"\" if the fast model is disabled in model-setup (secondary_model_enabled=false)."
+  default     = "127.0.0.1:18081"
 }
 
 variable "research_llm_endpoint" {
   type        = string
-  description = "Explicit OpenAI-compatible endpoint for the research model (the single phi-4-mini)."
+  description = "Explicit OpenAI-compatible endpoint for the research model (the shared phi-4-mini primary)."
   default     = "http://127.0.0.1:18080/v1"
 }
 
@@ -139,6 +145,87 @@ variable "pgid" {
   default     = 1000
 }
 
+# --- report mail (Odysseus mail function) -------------------------------------
+# The test manager delivers the final report as mail through Odysseus'
+# `/api/email/send`. That endpoint uses the first SMTP-capable Email Account;
+# when none is configured in the UI it falls back to these env vars (see
+# `_get_email_config` in Odysseus' routes/email/email_helpers.py), so a mailbox
+# can be wired declaratively from here. Leave `smtp_host` empty to configure the
+# account interactively in Settings -> Email instead.
+
+variable "smtp_host" {
+  type        = string
+  description = "SMTP server for the Odysseus mail function (report delivery). Empty -> configure an Email Account in the Odysseus UI."
+  default     = ""
+}
+
+variable "smtp_port" {
+  type        = number
+  description = "SMTP port. 465 implies implicit SSL, 587 implies STARTTLS unless smtp_security overrides it."
+  default     = 465
+}
+
+variable "smtp_security" {
+  type        = string
+  description = "SMTP transport security: ssl, starttls or none. Empty -> derive from smtp_port (465=ssl, 587=starttls)."
+  default     = ""
+
+  validation {
+    condition     = contains(["", "ssl", "starttls", "none"], var.smtp_security)
+    error_message = "smtp_security must be one of \"\", \"ssl\", \"starttls\" or \"none\"."
+  }
+}
+
+variable "smtp_user" {
+  type        = string
+  description = "SMTP username (usually the full mailbox address)."
+  default     = ""
+}
+
+variable "smtp_password" {
+  type        = string
+  sensitive   = true
+  description = "SMTP password / app token. Prefer the Odysseus UI if you would rather not keep it in state. Avoid '%': systemd expands it in Environment= lines (like the admin password)."
+  default     = ""
+}
+
+variable "imap_host" {
+  type        = string
+  description = "IMAP server. Set it (with imap_user/imap_password) so the delivered reports also appear in the Odysseus mail inbox and in the Sent folder."
+  default     = ""
+}
+
+variable "imap_port" {
+  type        = number
+  description = "IMAP port (993 implicit TLS, 143 STARTTLS)."
+  default     = 993
+}
+
+variable "imap_user" {
+  type        = string
+  description = "IMAP username."
+  default     = ""
+}
+
+variable "imap_password" {
+  type        = string
+  sensitive   = true
+  description = "IMAP password / app token. Avoid '%' (systemd specifier expansion in Environment= lines)."
+  default     = ""
+}
+
+variable "email_from" {
+  type        = string
+  description = "From address stamped on the report mail. Empty -> the SMTP user."
+  default     = ""
+}
+
+variable "report_mail_to" {
+  type        = string
+  description = "Default recipient of the test reports (comma-separated ok). Written to secrets/credentials.env as REPORT_MAIL_TO so the MCP bus, the agents and the tm CLI mail the report here. Empty -> the sender must pass a recipient explicitly."
+  default     = ""
+}
+
 # --- lifecycle ----------------------------------------------------------------
 
 variable "enable_linger" {
@@ -147,9 +234,15 @@ variable "enable_linger" {
   default     = true
 }
 
+variable "enable_on_boot" {
+  type        = bool
+  description = "Enable the Odysseus units in the user's default.target so they start automatically at boot/login. Default false: services are started now but not enabled, so start them explicitly (systemctl --user start <service>, or ./start-services.sh)."
+  default     = false
+}
+
 variable "service_state" {
   type        = string
-  description = "Desired state of the Odysseus quadlet services: 'running' enables+starts them, 'stopped' disables+stops them. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
+  description = "Desired state of the Odysseus quadlet services: 'running' starts them (enabled for boot only when enable_on_boot=true), 'stopped' disables+stops them. Toggle with `tofu apply -var service_state=stopped` (re-run with 'running' to start again)."
   default     = "running"
 
   validation {

@@ -39,12 +39,18 @@ locals {
 # the UI is healthy, keeping the whole stack reproducible from `tofu apply`.
 
 locals {
-  # The model stack runs a single phi-4-mini on port 18080 that serves both the
-  # crews and the interactive chat; the app uses host networking, so these are
-  # plain loopback URLs.
-  seed_endpoints = [
+  # The model stack serves two llama.cpp instances: the primary phi-4-mini on
+  # 18080 (crews + interactive chat) and the fast phi-mini-moe on 18081. The
+  # app uses host networking, so these are plain loopback URLs.
+  llm_hosts_value = var.llm_hosts != "" ? var.llm_hosts : (
+    var.llm_fast_host != "" ? "${var.llm_host},${var.llm_fast_host}" : var.llm_host
+  )
+
+  seed_endpoints = concat([
     { name = "phi-4-mini (llama.cpp)", base_url = "http://${var.llm_host}/v1" },
-  ]
+    ], var.llm_fast_host != "" ? [
+    { name = "phi-mini-moe (llama.cpp) (fast)", base_url = "http://${var.llm_fast_host}/v1" },
+  ] : [])
 
   # Prefer the compiled Dhall persona so the UI character matches the CLI/crew
   # agent. `build/` is generated (`nix develop -c just`); fall back to a short
@@ -101,8 +107,11 @@ resource "local_sensitive_file" "credentials_env" {
     ODYSSEUS_ADMIN_PASSWORD="${local.admin_password}"
     ODYSSEUS_URL="http://${var.bind_address}:${var.app_port}"
     LLM_PRIMARY="${var.llm_host}"
-    LLM_SECONDARY="${var.llm_hosts}"
+    LLM_SECONDARY="${local.llm_hosts_value}"
     RESEARCH_LLM_ENDPOINT="${var.research_llm_endpoint}"
+    # Recipient of the test-report mail (Odysseus mail function); read by the
+    # MCP bus / agents / tm CLI. Empty -> mail_report needs an explicit `to`.
+    REPORT_MAIL_TO="${var.report_mail_to}"
   EOT
 }
 
@@ -133,7 +142,7 @@ resource "local_file" "app_quadlet" {
     app_port              = var.app_port
     odysseus_dir          = local.odysseus_dir
     llm_host              = var.llm_host
-    llm_hosts             = var.llm_hosts
+    llm_hosts             = local.llm_hosts_value
     research_llm_endpoint = var.research_llm_endpoint
     searxng_port          = var.searxng_port
     chromadb_port         = var.chromadb_port
@@ -143,6 +152,16 @@ resource "local_file" "app_quadlet" {
     admin_password        = local.admin_password
     puid                  = var.puid
     pgid                  = var.pgid
+    smtp_host             = var.smtp_host
+    smtp_port             = var.smtp_port
+    smtp_security         = var.smtp_security
+    smtp_user             = var.smtp_user
+    smtp_password         = var.smtp_password
+    imap_host             = var.imap_host
+    imap_port             = var.imap_port
+    imap_user             = var.imap_user
+    imap_password         = var.imap_password
+    email_from            = var.email_from
   })
 }
 
@@ -210,7 +229,7 @@ resource "null_resource" "start_odysseus" {
       fi
       ${join("\n", [for img in [var.app_image, var.chromadb_image, var.searxng_image, var.ntfy_image] : "        podman image exists ${img} 2>/dev/null || podman pull ${img}"])}
       systemctl --user daemon-reload
-      ${join("\n", [for s in local.services : "        systemctl --user enable --now ${s}.service 2>/dev/null || true\n        systemctl --user restart ${s}.service 2>/dev/null || true"])}
+      ${join("\n", [for s in local.services : "        if [ \"${var.enable_on_boot}\" = \"true\" ]; then systemctl --user enable ${s}.service 2>/dev/null || true; fi\n        systemctl --user restart ${s}.service 2>/dev/null || true"])}
     EOT
   }
 }

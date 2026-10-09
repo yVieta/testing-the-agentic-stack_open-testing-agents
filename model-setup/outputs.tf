@@ -38,8 +38,8 @@ output "compose" {
   value = {
     file       = local.compose_file
     project    = "aigents"
-    services   = ["postgres", "phi4"]
-    fetch      = "model-fetch (profile: fetch, one-shot weight download)"
+    services   = var.secondary_model_enabled ? ["postgres", "phi-4-mini", "phi-mini-moe"] : ["postgres", "phi-4-mini"]
+    fetch      = "model-fetch (+model-fetch-secondary when enabled; profile: fetch, one-shot weight downloads)"
     pull_iface = "podman-compose -f ${local.compose_file} pull"
     up         = "podman-compose -f ${local.compose_file} up -d"
     ps         = "podman-compose -f ${local.compose_file} ps"
@@ -49,10 +49,11 @@ output "compose" {
 output "post_apply_steps" {
   description = "What still has to happen after apply."
   value = [
-    "apply runs podman-compose (--profile fetch) run --rm model-fetch   # downloads ${var.model_file} (~2.5 GB) into ${local.model_dir}",
-    "apply runs podman-compose up -d, then waits for the model health endpoint",
+    "apply runs podman-compose (--profile fetch) run --rm model-fetch   # downloads ${var.model_file} (~2.5 GB, phi-4-mini) into ${local.model_dir}",
+    "apply runs podman-compose up -d, then waits for each model health endpoint",
     "curl http://${var.bind_address}:${local.model_port}/health",
     "curl http://${var.bind_address}:${local.model_port}/v1/models",
+    "curl http://${var.bind_address}:${var.secondary_model_port}/v1/models  # fast model (phi-mini-moe, when enabled)",
   ]
 }
 
@@ -63,8 +64,27 @@ output "exposure" {
     firewall_open  = var.expose_public ? "ports opened with iptables" : "not modified"
     reachable_from = var.bind_address == "0.0.0.0" ? "LAN + localhost" : "localhost only"
     ports = {
-      model    = local.model_port
-      postgres = var.postgres_port
+      model           = local.model_port
+      model_secondary = var.secondary_model_port
+      postgres        = var.postgres_port
     }
+    firewall_ports = local.firewall_ports
+  }
+}
+
+output "lan_matrix" {
+  description = "Every port in the stack that a LAN device can connect to once the owning module binds 0.0.0.0 and the firewall is opened. Defaults shown; the SUT/Odysseus/MCP values come from their own modules (sut-setup, odysseus-setup, mcp-setup)."
+  value = {
+    "phi-4-mini OpenAI API (model-setup)"   = var.model_port
+    "phi-mini-moe OpenAI API (model-setup)" = var.secondary_model_port
+    "postgres (model-setup)"                = var.postgres_port
+    "SUT nginx -> Juice Shop (sut-setup)"   = 8080
+    "Juice Shop direct (sut-setup)"         = 3000
+    "Grafana (sut-setup)"                   = 3001
+    "Odysseus UI (odysseus-setup)"          = 7000
+    "SearXNG (odysseus-setup)"              = 8888
+    "ChromaDB (odysseus-setup)"             = 8100
+    "ntfy (odysseus-setup)"                 = 8091
+    "MCP bus (mcp-setup)"                   = 8765
   }
 }

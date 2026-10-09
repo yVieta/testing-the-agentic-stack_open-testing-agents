@@ -32,6 +32,7 @@ locals {
 
   # llama.cpp server args. Rendered as the compose `command`, flags come from
   # the same set that was validated for this host (CPU inference, mmap weights).
+  # The primary model (phi-4-mini) is the agents' brain.
   model_exec_args = concat(
     ["--model", "/models/${var.model_file}"],
     ["--alias", var.model_alias],
@@ -46,15 +47,48 @@ locals {
     ["--jinja", "--no-webui", "--metrics"],
   )
 
-  published_ports = [
+  # Secondary (fast) model: same flags, its own port/ctx/offload. Runs on CPU by
+  # default so it never competes with the primary for VRAM.
+  secondary_model_port = var.secondary_model_port
+  secondary_exec_args = concat(
+    ["--model", "/models/${var.secondary_model_file}"],
+    ["--alias", var.secondary_model_alias],
+    ["--port", "8080"],
+    ["--ctx-size", tostring(var.secondary_model_context_size)],
+    ["--parallel", tostring(var.secondary_model_parallel_slots)],
+    ["--n-gpu-layers", tostring(var.secondary_model_gpu_layers)],
+    ["--cache-type-k", var.secondary_model_kv_cache_type],
+    ["--cache-type-v", var.secondary_model_kv_cache_type],
+    var.model_threads > 0 ? ["--threads", tostring(var.model_threads)] : [],
+    var.model_api_key != "" ? ["--api-key", var.model_api_key] : [],
+    ["--jinja", "--no-webui", "--metrics"],
+  )
+
+  published_ports = var.secondary_model_enabled ? [
+    var.model_port,
+    var.secondary_model_port,
+    var.postgres_port,
+    ] : [
     var.model_port,
     var.postgres_port,
   ]
 
+  # Ports the firewall is opened for when expose_public=true. The operator can
+  # override expose_ports to include the other modules' services; empty means
+  # "this module's own published ports".
+  firewall_ports = length(var.expose_ports) > 0 ? var.expose_ports : local.published_ports
+
+  # Ports the start_compose lifecycle waits on.
+  model_ports = var.secondary_model_enabled ? [
+    var.model_port,
+    var.secondary_model_port,
+  ] : [var.model_port]
+
   # CDI device (NVIDIA container toolkit). Podman resolves nvidia.com/gpu=all
   # from the generated spec; only attach it when GPU offload is requested so a
   # --n-gpu-layers 0 run stays pure CPU.
-  model_gpu_devices = var.model_gpu_layers > 0 ? ["nvidia.com/gpu=all"] : []
+  model_gpu_devices           = var.model_gpu_layers > 0 ? ["nvidia.com/gpu=all"] : []
+  secondary_model_gpu_devices = var.secondary_model_gpu_layers > 0 ? ["nvidia.com/gpu=all"] : []
 
   postgres_password = var.postgres_password != "" ? var.postgres_password : random_password.postgres[0].result
 }
@@ -98,6 +132,8 @@ resource "local_sensitive_file" "credentials_env" {
     POSTGRES_DSN=postgresql://${var.postgres_user}:${local.postgres_password}@127.0.0.1:${var.postgres_port}/${var.postgres_db}
     MODEL_URL=http://127.0.0.1:${local.model_port}
     MODEL_NAME=${var.model_alias}
+    MODEL_FAST_URL=${var.secondary_model_enabled ? "http://127.0.0.1:${local.secondary_model_port}" : ""}
+    MODEL_FAST_NAME=${var.secondary_model_enabled ? var.secondary_model_alias : ""}
     MODEL_API_KEY=${var.model_api_key}
   EOT
 }
@@ -128,9 +164,19 @@ resource "local_file" "compose_yaml" {
     model_port        = local.model_port
     model_exec_args   = local.model_exec_args
     model_gpu_devices = local.model_gpu_devices
-    hf_endpoint       = var.hf_endpoint
-    hf_token          = var.hf_token
-    scripts_dir       = local.scripts_dir
+
+    secondary_model_enabled     = var.secondary_model_enabled
+    secondary_model_repo        = var.secondary_model_repo
+    secondary_model_file        = var.secondary_model_file
+    secondary_model_sha256      = var.secondary_model_sha256
+    secondary_model_alias       = var.secondary_model_alias
+    secondary_model_port        = local.secondary_model_port
+    secondary_exec_args         = local.secondary_exec_args
+    secondary_model_gpu_devices = local.secondary_model_gpu_devices
+
+    hf_endpoint = var.hf_endpoint
+    hf_token    = var.hf_token
+    scripts_dir = local.scripts_dir
   })
 }
 
@@ -208,7 +254,7 @@ resource "null_resource" "open_firewall" {
   depends_on = [null_resource.install_podman]
 
   triggers = {
-    ports        = join(",", local.published_ports)
+    ports        = join(",", local.firewall_ports)
     bind_address = var.bind_address
   }
 
@@ -219,7 +265,7 @@ resource "null_resource" "open_firewall" {
         echo "bind_address is ${var.bind_address}, not opening the firewall" >&2
         exit 0
       fi
-      for p in ${join(" ", local.published_ports)}; do
+      for p in ${join(" ", local.firewall_ports)}; do
         ${var.sudo_command} sh -c 'command -v iptables >/dev/null 2>&1 || exit 0
           iptables -C INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment aigents-model 2>/dev/null ||
             iptables -I INPUT -p tcp --dport "$1" -j ACCEPT -m comment --comment aigents-model' sh "$p"
@@ -267,16 +313,18 @@ resource "null_resource" "start_compose" {
 
       # one-shot weight download (fetch-gguf.sh exits 0 when already present)
       podman-compose -p aigents -f "${local.compose_file}" --profile fetch run --rm model-fetch
+${var.secondary_model_enabled ? "      podman-compose -p aigents -f \"${local.compose_file}\" --profile fetch run --rm model-fetch-secondary" : ""}
 
-      # bring up postgres + the single phi4 instance
+      # bring up postgres + the primary model + the secondary fast model
       podman-compose -p aigents -f "${local.compose_file}" up -d
 
-      # the CLI-dedicated second instance was retired; drop it when a previous
-      # version of this stack left it running
-      podman rm -f aigents-phi4-cli 2>/dev/null || true
+      # the CLI-dedicated second instance (aigents-phi4-cli) and the original
+      # phi-4-mini container (aigents-phi4) were retired; drop them when a
+      # previous version of this stack left them running
+      podman rm -f aigents-phi4-cli aigents-phi4 2>/dev/null || true
 
-      # wait for the model API (weights can take minutes to mmap)
-      for port in ${local.model_port}; do
+      # wait for each model API (weights can take minutes to mmap)
+      for port in ${join(" ", local.model_ports)}; do
         echo "waiting for model on 127.0.0.1:$${port} ..."
         for i in $(seq 1 120); do
           curl -fsS "http://127.0.0.1:$${port}/health" && break
