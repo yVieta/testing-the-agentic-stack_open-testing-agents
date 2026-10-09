@@ -21,6 +21,15 @@ RUN pip install --no-cache-dir \
       "crewai[tools,litellm]>=1.15.20,<2.0.0" \
       "psycopg[binary]>=3.2"
 
+# Playwright + a system-wide Chromium so the e2e agent drives a real browser.
+# PLAYWRIGHT_BROWSERS_PATH keeps the browser out of the venv crewai builds with
+# --system-site-packages, so it stays visible at runtime; `playwright install
+# --with-deps` also pulls the shared libraries Chromium needs.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN pip install --no-cache-dir "playwright>=1.47,<2.0.0" \
+ && playwright install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/* /root/.cache/pip
+
 # bake the formal harness into the image (repo stays read-only at runtime)
 COPY skills/lean /opt/harness/
 RUN cd /opt/harness && lake build

@@ -10,13 +10,13 @@ in  { name = "e2e"
     , agents = [ "e2e_test_agent" ]
     , tasks =
         [ { name = "write_code_in_python_task"
-          , description = "write python code using the playwright library (installed in the venv, browsers pre-provisioned via PLAYWRIGHT_BROWSERS_PATH) and run it against the web ui at {target_url}; probe the homepage, main routes, and forms, collecting console errors and screenshots"
+          , description = "write python code using the pre-installed playwright library and run it against the OWASP Juice Shop web ui at {target_url}; save the generated test as playwright_test.py, probe the homepage, main routes, and forms, collecting console errors and screenshots"
           , expected_output = "playwright output with a list of issues found on the target web ui"
           , agent = "e2e_test_agent"
           }
         , { name = "not_the_results_and_task"
-          , description = "review the collected playwright output, adjust the tests and re-run as needed, then write the final issues list into previous_output.md so the next agent can pick it up"
-          , expected_output = "playwright running with final issues written to previous_output.md"
+          , description = "review the collected playwright output, adjust playwright_test.py and re-run as needed, then write the final issues list into previous_output.md so the next agent can pick it up"
+          , expected_output = "playwright running with final issues written to previous_output.md, plus the latest playwright_test.py in the working directory"
           , agent = "e2e_test_agent"
           }
         ]

@@ -1,5 +1,7 @@
 locals {
-  home = var.home_dir == "" ? "/root" : var.home_dir
+  # Home of the user running tofu (the rootless podman/systemd user). Never
+  # hardcode a username: empty home_dir resolves the invoking user's real home.
+  home = var.home_dir != "" ? var.home_dir : pathexpand("~")
 
   # path.module is "." in a root module; templates need absolute paths.
   module_dir = abspath(path.module)
@@ -44,27 +46,8 @@ locals {
     ["--jinja", "--no-webui", "--metrics"],
   )
 
-  # Second phi-4-mini instance, dedicated to the interactive CLI: same model,
-  # one slot, its own port. Both processes mmap the same GGUF, sharing the
-  # read-only weight pages in the kernel page cache.
-  model_cli_port = var.model_cli_port
-  model_cli_exec_args = concat(
-    ["--model", "/models/${var.model_file}"],
-    ["--alias", var.model_alias],
-    ["--port", "8081"],
-    ["--ctx-size", tostring(var.model_context_size)],
-    ["--parallel", tostring(var.model_cli_parallel_slots)],
-    ["--n-gpu-layers", tostring(var.model_gpu_layers)],
-    ["--cache-type-k", var.model_kv_cache_type],
-    ["--cache-type-v", var.model_kv_cache_type],
-    var.model_threads > 0 ? ["--threads", tostring(var.model_threads)] : [],
-    var.model_api_key != "" ? ["--api-key", var.model_api_key] : [],
-    ["--jinja", "--no-webui", "--metrics"],
-  )
-
   published_ports = [
     var.model_port,
-    var.model_cli_port,
     var.postgres_port,
   ]
 
@@ -137,19 +120,17 @@ resource "local_file" "compose_yaml" {
     initdb_dir        = local.initdb_dir
     bind_address      = var.bind_address
 
-    model_image         = var.model_image
-    model_dir           = local.model_dir
-    model_repo          = var.model_repo
-    model_file          = var.model_file
-    model_sha256        = var.model_sha256
-    model_port          = local.model_port
-    model_cli_port      = local.model_cli_port
-    model_exec_args     = local.model_exec_args
-    model_cli_exec_args = local.model_cli_exec_args
-    model_gpu_devices   = local.model_gpu_devices
-    hf_endpoint         = var.hf_endpoint
-    hf_token            = var.hf_token
-    scripts_dir         = local.scripts_dir
+    model_image       = var.model_image
+    model_dir         = local.model_dir
+    model_repo        = var.model_repo
+    model_file        = var.model_file
+    model_sha256      = var.model_sha256
+    model_port        = local.model_port
+    model_exec_args   = local.model_exec_args
+    model_gpu_devices = local.model_gpu_devices
+    hf_endpoint       = var.hf_endpoint
+    hf_token          = var.hf_token
+    scripts_dir       = local.scripts_dir
   })
 }
 
@@ -287,11 +268,15 @@ resource "null_resource" "start_compose" {
       # one-shot weight download (fetch-gguf.sh exits 0 when already present)
       podman-compose -p aigents -f "${local.compose_file}" --profile fetch run --rm model-fetch
 
-      # bring up postgres + both phi4 instances
+      # bring up postgres + the single phi4 instance
       podman-compose -p aigents -f "${local.compose_file}" up -d
 
-      # wait for both model APIs (weights can take minutes to mmap)
-      for port in ${local.model_port} ${local.model_cli_port}; do
+      # the CLI-dedicated second instance was retired; drop it when a previous
+      # version of this stack left it running
+      podman rm -f aigents-phi4-cli 2>/dev/null || true
+
+      # wait for the model API (weights can take minutes to mmap)
+      for port in ${local.model_port}; do
         echo "waiting for model on 127.0.0.1:$${port} ..."
         for i in $(seq 1 120); do
           curl -fsS "http://127.0.0.1:$${port}/health" && break

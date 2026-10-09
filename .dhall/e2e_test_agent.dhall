@@ -9,10 +9,11 @@ let Types = ./Types.dhall
 let Agent = Types.Agent
 
 in  { role = "e2e test agent"
-    , goal = "test the web ui at {target_url} by writing and running playwright tests, capture screenshots and console/page errors, and save the failures to a file for the pentester and the test manager to read"
-    , backstory = "a highly skilled automation test engineer who knows playwright + python deeply; the host has headless chromium/webkit browsers pre-installed via nixpkgs (see PLAYWRIGHT_BROWSERS_PATH), so always write and run real playwright tests against the live server"
+    , goal = "test the OWASP Juice Shop web ui at {target_url} by writing and running playwright tests, capture screenshots and console/page errors, save the generated test as playwright_test.py (published to Odysseus) and the failures to previous_output.md for the pentester and the test manager to read"
+    , backstory = "a highly skilled automation test engineer who knows playwright + python deeply; playwright and a headless chromium are pre-installed in this agent's image (PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright, launch with --no-sandbox), so always write and run real playwright tests against the live Juice Shop server"
     , llm = "openai/phi-4-mini"
     , tools = [ "FileReadTool", "FileWriterTool" ]
+    , skills = Some [ "/repo/skills" ]
     , settings = { verbose = False, allow_delegation = True, planning = True }
     , guardrail = None Text
     } : Agent

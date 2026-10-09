@@ -1,7 +1,7 @@
 variable "home_dir" {
   type        = string
-  description = "Home directory of the user that runs the Podman rootless user services."
-  default     = "/home/vieta"
+  description = "Home directory of the user that runs the Podman rootless user services. Leave empty (default) to resolve the real home of the user running tofu (pathexpand \"~\"), so storage paths are never hardcoded to a username; override with `-var home_dir=/home/x` when deploying through sudo or a dedicated service account."
+  default     = ""
 }
 
 variable "bind_address" {

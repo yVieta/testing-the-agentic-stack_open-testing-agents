@@ -44,6 +44,7 @@ let Agent
       , backstory : Text
       , llm : Text
       , tools : List Text
+      , skills : Optional (List Text)
       , settings : AgentSettings
       , guardrail : Optional Text
       }

@@ -1,7 +1,7 @@
 variable "home_dir" {
   type        = string
-  description = "Home dir of user that runs the Podman rootless user services."
-  default     = "/home/vieta"
+  description = "Home dir of user that runs the Podman rootless user services. Leave empty (default) to resolve the real home of the user running tofu (pathexpand \"~\"), so storage paths are never hardcoded to a username; override with `-var home_dir=/home/x` when deploying through sudo or a dedicated service account."
+  default     = ""
 }
 
 variable "spool_root" {
@@ -36,7 +36,7 @@ variable "model_name" {
 
 variable "target_url" {
   type        = string
-  description = "System under test the agents exercise (nginx proxy of the rootless SUT on 127.0.0.1)."
+  description = "System under test the agents exercise: the OWASP Juice Shop behind the nginx proxy of the rootless SUT on 127.0.0.1."
   default     = "http://127.0.0.1:8080"
 }
 
@@ -55,6 +55,12 @@ variable "build_agent_image" {
 variable "credential_file" {
   type        = string
   description = "credentials.env written by model-setup; mounted into each agent."
+  default     = ""
+}
+
+variable "odysseus_secrets_dir" {
+  type        = string
+  description = "Directory holding Odysseus' credentials.env (written by odysseus-setup). Mounted read-only into each agent so the e2e worker can publish generated Playwright code to the Odysseus document library. Defaults to <spool_root>/odysseus/secrets."
   default     = ""
 }
 

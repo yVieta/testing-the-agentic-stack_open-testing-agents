@@ -15,11 +15,12 @@ local phi-4-mini model and to run an agent with the test-manager persona.
 | `odysseus-ntfy`       | `docker.io/binwiederhier/ntfy`            | `127.0.0.1:8091` (->80)  | Notification push                |
 
 The app runs with **host networking** (rootless containers cannot reach
-host-loopback services through pasta's gateway). It talks to the two
-phi-4-mini instances directly on the loopback:
+host-loopback services through pasta's gateway). It talks to the single
+phi-4-mini instance directly on the loopback:
 
-- `LLM_HOST` -> `127.0.0.1:18081` (CLI-dedicated phi-4-mini)
-- `LLM_HOSTS` -> `127.0.0.1:18080` (crew-facing phi-4-mini)
+- `LLM_HOST` -> `127.0.0.1:18080` (the shared phi-4-mini: crews + chats)
+- `LLM_HOSTS` -> `127.0.0.1:18080` (same instance; kept because the app scans
+  both env vars) 
 - `RESEARCH_LLM_ENDPOINT` -> `http://127.0.0.1:18080/v1`
 
 ## Usage
@@ -44,9 +45,10 @@ cat /var/spool/aigents/odysseus/secrets/credentials.env
 The module seeds the workspace on every `apply` (idempotently) through
 `scripts/configure_odysseus.py`:
 
-1. **Model endpoints** — registers `http://127.0.0.1:18081/v1` (interactive
-   CLI/Odysseus) and `http://127.0.0.1:18080/v1` (crews) as OpenAI-compatible
-   endpoints, where `phi-4-mini` is discovered.
+1. **Model endpoint** — registers `http://127.0.0.1:18080/v1` (the single
+   phi-4-mini serving crews + interactive chat) as an OpenAI-compatible
+   endpoint, where `phi-4-mini` is discovered. Stale endpoints left over from
+   the retired CLI-only instance (port 18081) are pruned on apply.
 2. **Test Manager preset** — installs and activates a character preset built
    from the compiled persona at `<repo>/build/agents/test_manager_agent.json`
    (run `nix develop -c just agents` first; a short fallback prompt is used when

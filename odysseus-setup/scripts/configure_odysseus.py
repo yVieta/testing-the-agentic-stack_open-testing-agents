@@ -6,8 +6,9 @@ seed file (rendered from the module variables). It:
 
   1. waits for the app to become healthy,
   2. logs in as the admin (password read from the generated credentials.env),
-  3. registers the two phi-4-mini endpoints (CLI + crew) if missing,
-  4. installs / activates the "Test Manager" character preset.
+  3. registers the single phi-4-mini endpoint if missing and prunes stale model
+  4. endpoints that still point at the retired CLI-only instance (port 18081),
+  5. installs / activates the "Test Manager" character preset.
 
 Every step is a no-op when the object already exists, so re-running the tofu
 apply does not create duplicates. Only the standard library is used.
@@ -67,6 +68,14 @@ class Client:
     def patch(self, path, data, form=False):
         return json.load(self._open("PATCH", path, data, form=form))
 
+    def delete(self, path):
+        try:
+            self._open("DELETE", path)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return
+            raise
+
 
 def wait_for_health(client, attempts=80, delay=3):
     for _ in range(attempts):
@@ -94,8 +103,25 @@ def login(client, user, password, attempts=40, delay=3):
 
 
 def ensure_endpoints(client, endpoints):
-    existing = client.get("/api/model-endpoints")
-    known = {e.get("base_url", "").rstrip("/") for e in existing}
+    desired = {ep["base_url"].rstrip("/"): ep["name"] for ep in endpoints}
+    for e in client.get("/api/model-endpoints"):
+        url = e.get("base_url", "").rstrip("/")
+        name = e.get("name")
+        if url in desired and desired[url] == name:
+            continue
+        # Prune stale model registrations on this host: 18081 was the retired
+        # CLI-only instance, 18080 duplicates are redundant with a single model,
+        # and a declared URL registered under an old name is recreated so the
+        # seed file stays the source of truth.
+        if "18081" in url or (":18080" in url and (url not in desired or desired[url] != name)):
+            eid = e.get("id")
+            if eid is None:
+                print(f"odysseus-seed: endpoint {name} -> {url} has no id; skipping",
+                      file=sys.stderr)
+                continue
+            client.delete(f"/api/model-endpoints/{eid}")
+            print(f"odysseus-seed: removed stale endpoint {name} -> {url}")
+    known = {e.get("base_url", "").rstrip("/") for e in client.get("/api/model-endpoints")}
     for ep in endpoints:
         url = ep["base_url"].rstrip("/")
         if url in known:

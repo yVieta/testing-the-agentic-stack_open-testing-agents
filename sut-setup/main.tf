@@ -1,6 +1,9 @@
 locals {
-  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", var.home_dir) : var.quadlet_dir
-  expanded_nginx_dir   = var.nginx_config_dir == "~/.config/iacSUT/nginx" ? format("%s/.config/iacSUT/nginx", var.home_dir) : var.nginx_config_dir
+  # Home of the user running tofu (the rootless podman/systemd user). Empty
+  # home_dir resolves the invoking user's real home, so no username is baked in.
+  home                 = var.home_dir != "" ? var.home_dir : pathexpand("~")
+  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", local.home) : var.quadlet_dir
+  expanded_nginx_dir   = var.nginx_config_dir == "~/.config/iacSUT/nginx" ? format("%s/.config/iacSUT/nginx", local.home) : var.nginx_config_dir
 }
 
 resource "local_file" "juice_shop_quadlet" {
@@ -84,7 +87,7 @@ resource "null_resource" "start_services" {
       set -eux
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
       user=$(id -un)
-      wants=${var.home_dir}/.config/systemd/user/default.target.wants
+      wants=${local.home}/.config/systemd/user/default.target.wants
       mkdir -p "$wants"
       systemctl --user daemon-reload
       # Rootless user services only: no sudo, no firewall changes.

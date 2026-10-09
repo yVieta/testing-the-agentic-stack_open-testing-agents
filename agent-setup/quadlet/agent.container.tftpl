@@ -9,6 +9,7 @@ Pull=never
 Network=host
 Volume=${repo_dir}:/repo:ro,Z
 Volume=${credential_file}:/run/secrets/credentials.env:ro,Z
+Volume=${odysseus_secrets_dir}:/run/secrets/odysseus:ro,Z
 Environment=CREW_ROLE=${agent_role}
 Environment=CREW_DIR=/repo/build/${role_dir}
 Environment=MODEL_URL=${model_url}

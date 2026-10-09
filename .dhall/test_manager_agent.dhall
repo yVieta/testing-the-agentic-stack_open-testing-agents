@@ -13,6 +13,7 @@ in  { role = "test manager"
     , backstory = "an experienced test manager with a track record of running end-to-end and security testing programs across large web applications; the host ships CLI utilities (jq, glow, taskwarrior, gnuplot) it can use to parse status JSON and shape the final markdown report"
     , llm = "openai/phi-4-mini"
     , tools = [ "FileReadTool", "FileWriterTool" ]
+    , skills = Some [ "/repo/skills" ]
     , settings = { verbose = False, allow_delegation = True, planning = True }
     , guardrail = None Text
     } : Agent

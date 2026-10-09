@@ -14,11 +14,23 @@ postgres (`15432`) are already up on `127.0.0.1`.
 
 | Piece | Description |
 |---|---|
-| `localhost/aigents-agent` image | python 3.12-slim + `crewai[tools]` + `psycopg[binary]` + lean4 via **elan**; `skills/lean/` is baked into `/opt/harness` and built with `lake build` |
-| `agent-<role>.container` per role | Quadlet: `Network=host`, repo mounted read-only at `/repo`, `credentials.env` at `/run/secrets/credentials.env`, runs `worker/run_agent.py` |
+| `localhost/aigents-agent` image | python 3.12-slim + `crewai[tools]` + `psycopg[binary]` + **Playwright/Chromium** (for the e2e agent) + lean4 via **elan**; `skills/lean/` is baked into `/opt/harness` and built with `lake build` |
+| `agent-<role>.container` per role | Quadlet: `Network=host`, repo mounted read-only at `/repo`, `credentials.env` at `/run/secrets/credentials.env`, the Odysseus secrets dir at `/run/secrets/odysseus`, runs `worker/run_agent.py` |
 
 Roles come from `.dhall/Manifest.dhall` (default): `e2e`, `pentester`,
 `manager` → `build/<role>/` crews.
+
+## Publishing generated Playwright code to Odysseus
+
+The SUT is the **OWASP Juice Shop** served by the nginx proxy on
+`http://127.0.0.1:8080` (`target_url`). The e2e agent writes its generated test
+as `playwright_test.py` in its working directory. After the crew finishes, the
+worker executes that file (Chromium is baked into the image) and records the
+real browser output, then publishes the code to the **Odysseus document
+library** via `POST /api/document`, so the generated code is viewable in the
+Odysseus UI (login creds are read from the read-only
+`/run/secrets/odysseus/credentials.env` mount; publishing is skipped silently if
+that file is not present yet).
 
 ## Usage
 

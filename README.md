@@ -133,9 +133,9 @@ cat /var/spool/aigents/odysseus/secrets/credentials.env
 ```
 
 The module seeds the workspace declaratively on every apply: it registers the
-two model endpoints (`http://127.0.0.1:18081/v1` for interactive chats,
-`http://127.0.0.1:18080/v1` for crews) and installs/activates a **Test Manager**
-character preset built from the compiled
+single model endpoint (`http://127.0.0.1:18080/v1`, the one phi-4-mini instance
+that serves both crews and interactive chats) and installs/activates a **Test
+Manager** character preset built from the compiled
 `build/agents/test_manager_agent.json`. Pick that character (or the endpoint) in
 the model picker and the chat runs as the test manager against phi-4-mini.
 
@@ -143,9 +143,13 @@ the model picker and the chat runs as the test manager against phi-4-mini.
 
 | Role            | Crew dir        | Work                              | Output            |
 |-----------------|-----------------|-----------------------------------|-------------------|
-| e2e engineer    | `build/e2e`     | playwright tests against the SUT  | `previous_output.md` |
+| e2e engineer    | `build/e2e`     | playwright tests against the SUT  | `previous_output.md` (+ `playwright_test.py` published to Odysseus) |
 | pentester       | `build/pentester` | nmap/nikto/sqlmap security scans | `previous_output.md` |
 | test manager    | `build/manager` | review + final report             | `report.md`       |
+
+Agents also load crewAI **skills** from `skills/` (progressive disclosure via
+`SKILL.md`): `test-manager-report` for the manager, `playwright-testing` for the
+e2e engineer.
 
 Every cycle the worker asks the **Lean4 harness** to review the current tuning
 parameters (`skills/lean/Main.lean` — queue_size, dedupe_cap, crew_timeout,
@@ -172,7 +176,8 @@ of `accepted` lets the crew run.
   **nvidia-container-toolkit**; set `model_gpu_layers = 0` to fall back to CPU.
 * **System RAM:** 16 GB.
 * **Model:** `unsloth/Phi-4-mini-instruct-GGUF` — `Phi-4-mini-instruct-Q4_K_M.gguf`
-  (~2.5 GB), served as `phi-4-mini` by **two** llama.cpp instances that share
-  the mmapped weights: `127.0.0.1:18080` (agent crews, 2 parallel slots) and
-  `127.0.0.1:18081` (interactive CLI/Odysseus, 1 slot).
+  (~2.5 GB), served as `phi-4-mini` by **one** llama.cpp instance on
+  `127.0.0.1:18080` that handles both the agent crews and the interactive
+  CLI/Odysseus chat (context **65536** total = **16384 per slot**, **4**
+  parallel slots).
 * **Embeddings:** phi-4-mini hidden size **3072** -> `vector(3072)` in pgvector

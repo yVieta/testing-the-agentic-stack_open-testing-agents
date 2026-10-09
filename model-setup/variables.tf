@@ -1,7 +1,7 @@
 variable "home_dir" {
   type        = string
-  description = "Home dir of user that runs Podman rootless user services."
-  default     = "/home/vieta"
+  description = "Home dir of the user that runs the Podman rootless user services. Leave empty (default) to resolve the real home of the user running tofu (pathexpand \"~\"), so storage paths are never hardcoded to a username; override with `-var home_dir=/home/x` when deploying through sudo or a dedicated service account."
+  default     = ""
 }
 
 variable "spool_root" {
@@ -80,8 +80,8 @@ variable "model_alias" {
 
 variable "model_context_size" {
   type        = number
-  description = "KV cache context window. A smaller window keeps CPU-only inference out of swap."
-  default     = 16384
+  description = "Total KV-cache context (llama.cpp --ctx-size). llama-server splits this across --parallel slots, so each request gets model_context_size / model_parallel_slots tokens (default 65536 / 4 = 16384 per slot). Sized to fit one phi-4-mini + its KV in the 12 GB GPU alongside everything else."
+  default     = 65536
 }
 
 variable "model_threads" {
@@ -92,25 +92,13 @@ variable "model_threads" {
 
 variable "model_parallel_slots" {
   type        = number
-  description = "Concurrent request slots for the crew-facing model server (phi4). Each slot multiplies the KV cache; 2 lets crews overlap."
-  default     = 2
-}
-
-variable "model_cli_port" {
-  type        = number
-  description = "Host port of the second phi-4-mini instance dedicated to the interactive test-manager CLI."
-  default     = 18081
-}
-
-variable "model_cli_parallel_slots" {
-  type        = number
-  description = "Slots for the CLI-dedicated model server (phi4-cli); 1 is enough for a single interactive terminal."
-  default     = 1
+  description = "Concurrent request slots on the single phi-4-mini server. Each slot multiplies the KV cache; 4 lets the three crews overlap with the interactive CLI/Odysseus chat."
+  default     = 4
 }
 
 variable "model_gpu_layers" {
   type        = number
-  description = "Layers offloaded to VRAM. 0 runs pure CPU. 99 offloads every phi-4-mini layer to the NVIDIA GPU (RTX 3060, CDI device nvidia.com/gpu=all). Both phi4 instances share the GPU."
+  description = "Layers offloaded to VRAM. 0 runs pure CPU. 99 offloads every phi-4-mini layer to the NVIDIA GPU (RTX 3060, CDI device nvidia.com/gpu=all). The single instance serves crews + interactive chat."
   default     = 99
 }
 

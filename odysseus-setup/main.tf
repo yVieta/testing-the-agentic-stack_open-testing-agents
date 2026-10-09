@@ -1,5 +1,8 @@
 locals {
-  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", var.home_dir) : var.quadlet_dir
+  # Home of the user running tofu (the rootless podman/systemd user). Empty
+  # home_dir resolves the invoking user's real home, so no username is baked in.
+  home                 = var.home_dir != "" ? var.home_dir : pathexpand("~")
+  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", local.home) : var.quadlet_dir
   odysseus_dir         = "${var.spool_root}/odysseus"
   searxng_settings_dir = "${local.odysseus_dir}/searxng"
   services             = ["odysseus-searxng", "odysseus-chromadb", "odysseus-ntfy", "odysseus-app"]
@@ -36,11 +39,11 @@ locals {
 # the UI is healthy, keeping the whole stack reproducible from `tofu apply`.
 
 locals {
-  # Both LLM hosts are "<host>:<port>"; the app runs with host networking, so
-  # these are plain loopback URLs.
+  # The model stack runs a single phi-4-mini on port 18080 that serves both the
+  # crews and the interactive chat; the app uses host networking, so these are
+  # plain loopback URLs.
   seed_endpoints = [
-    { name = "phi-4-mini CLI (llama.cpp)", base_url = "http://${var.llm_host}/v1" },
-    { name = "phi-4-mini Crews (llama.cpp)", base_url = "http://${var.llm_hosts}/v1" },
+    { name = "phi-4-mini (llama.cpp)", base_url = "http://${var.llm_host}/v1" },
   ]
 
   # Prefer the compiled Dhall persona so the UI character matches the CLI/crew
@@ -224,6 +227,7 @@ resource "null_resource" "configure_odysseus" {
 
   triggers = {
     seed          = local_file.seed.content
+    script        = filesha256("${path.module}/scripts/configure_odysseus.py")
     service_state = var.service_state
   }
 

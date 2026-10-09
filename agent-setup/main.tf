@@ -1,7 +1,11 @@
 locals {
-  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", var.home_dir) : var.quadlet_dir
+  # Home of the user running tofu (the rootless podman/systemd user). Empty
+  # home_dir resolves the invoking user's real home, so no username is baked in.
+  home                 = var.home_dir != "" ? var.home_dir : pathexpand("~")
+  expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", local.home) : var.quadlet_dir
   repo_dir             = var.repo_dir != "" ? var.repo_dir : abspath("${path.module}/..")
   credential_file      = var.credential_file != "" ? var.credential_file : "${var.spool_root}/database/secrets/credentials.env"
+  odysseus_secrets_dir = var.odysseus_secrets_dir != "" ? var.odysseus_secrets_dir : "${var.spool_root}/odysseus/secrets"
 }
 
 # --- agent image ------------------------------------------------------------
@@ -28,6 +32,22 @@ resource "null_resource" "build_agent_image" {
   }
 }
 
+# --- host directories -------------------------------------------------------
+
+# The Odysseus credentials dir is written by odysseus-setup, which may not have
+# run yet on a fresh deploy (agent-setup starts first). Create it so the read-
+# only bind mount below always has a source; the worker simply skips publishing
+# until credentials.env appears.
+resource "null_resource" "odysseus_secrets_dir" {
+  triggers = {
+    dir = local.odysseus_secrets_dir
+  }
+
+  provisioner "local-exec" {
+    command = "mkdir -p \"${local.odysseus_secrets_dir}\""
+  }
+}
+
 # --- quadlet units: one systemd user service per role -----------------------
 
 resource "local_file" "agent_quadlet" {
@@ -35,14 +55,15 @@ resource "local_file" "agent_quadlet" {
 
   filename = "${local.expanded_quadlet_dir}/agent-${each.key}.container"
   content = templatefile("${path.module}/quadlet/agent.container.tftpl", {
-    repo_dir        = local.repo_dir
-    image           = var.agent_image
-    role_dir        = each.key   # build/<role>
-    agent_role      = each.value # manifest agent name
-    model_url       = var.model_url
-    model_name      = var.model_name
-    target_url      = var.target_url
-    credential_file = local.credential_file
+    repo_dir             = local.repo_dir
+    image                = var.agent_image
+    role_dir             = each.key   # build/<role>
+    agent_role           = each.value # manifest agent name
+    model_url            = var.model_url
+    model_name           = var.model_name
+    target_url           = var.target_url
+    credential_file      = local.credential_file
+    odysseus_secrets_dir = local.odysseus_secrets_dir
   })
 }
 
@@ -52,6 +73,7 @@ resource "null_resource" "start_agents" {
   depends_on = [
     local_file.agent_quadlet,
     null_resource.build_agent_image,
+    null_resource.odysseus_secrets_dir,
   ]
 
   triggers = {
@@ -59,10 +81,10 @@ resource "null_resource" "start_agents" {
     service_state = var.service_state
     # A rebuilt image or worker script is only picked up by a restarted unit;
     # include their hashes so `tofu apply` converges the running agents too.
-    image         = filesha256("${path.module}/Containerfile")
-    harness       = filesha256("${local.repo_dir}/skills/lean/Main.lean")
-    harness_lib   = filesha256("${local.repo_dir}/skills/lean/AgentHarness.lean")
-    worker        = filesha256("${local.repo_dir}/worker/run_agent.py")
+    image       = filesha256("${path.module}/Containerfile")
+    harness     = filesha256("${local.repo_dir}/skills/lean/Main.lean")
+    harness_lib = filesha256("${local.repo_dir}/skills/lean/AgentHarness.lean")
+    worker      = filesha256("${local.repo_dir}/worker/run_agent.py")
   }
 
   provisioner "local-exec" {

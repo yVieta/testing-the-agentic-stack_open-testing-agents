@@ -49,35 +49,6 @@ services:
       retries: 5
     restart: on-failure
 
-  # Second phi-4-mini instance for the interactive test-manager CLI. Both
-  # servers mmap the same weights, so this costs only its KV cache.
-  phi4-cli:
-    image: ${model_image}
-    container_name: aigents-phi4-cli
-    volumes:
-      - ${model_dir}:/models:Z
-    environment:
-      LLAMA_CACHE: /models/.llama-cache
-      LLAMA_ARG_HOST: 0.0.0.0
-    command:
-%{ for arg in model_cli_exec_args ~}
-      - "${arg}"
-%{ endfor ~}
-%{ if length(model_gpu_devices) > 0 ~}
-    devices:
-%{ for dev in model_gpu_devices ~}
-      - "${dev}"
-%{ endfor ~}
-%{ endif ~}
-    ports:
-      - "${bind_address}:${model_cli_port}:8081"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: on-failure
-
   model-fetch:
     image: ${model_image}
     profiles: ["fetch"] # one-shot, started via `run --rm`

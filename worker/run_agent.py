@@ -8,12 +8,15 @@ Runs inside the agent quadlet container (agent-setup/), with the repo mounted
 read-only at /repo and the model/postgres reachable on 127.0.0.1.
 """
 
+import hashlib
+import http.cookiejar
 import json
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -31,6 +34,10 @@ TARGET_URL = os.environ.get("TARGET_URL", "")
 DSN = os.environ.get("POSTGRES_DSN", "")
 HARNESS = Path(os.environ.get("HARNESS_DIR", "/opt/harness"))  # lean project, baked in image
 SECRETS = Path("/run/secrets/credentials.env")
+# credentials.env written by odysseus-setup; mounted read-only (may be absent
+# until that module has applied on a fresh deploy).
+ODYSSEUS_SECRETS = Path(os.environ.get("ODYSSEUS_SECRETS",
+                                       "/run/secrets/odysseus/credentials.env"))
 
 # AgentHarness default Tuning per role: queue_size dedupe_cap crew_timeout
 # steps step_cost. The e2e crew runs many quick playwright tests, the pentester
@@ -159,6 +166,28 @@ def run_crew() -> str:
     return r.stdout.strip() or "crew ran, empty output"
 
 
+def run_playwright(timeout: int = 1800) -> str:
+    """Execute the crew's generated playwright_test.py against the SUT.
+
+    The crew agents only carry crewAI's file tools (the framework ships no local
+    code-execution tool), so the runner is what actually drives the browser.
+    Best-effort: a missing or failing test must not abort the loop.
+    """
+    script = WORK / "playwright_test.py"
+    if not script.is_file():
+        return "no playwright_test.py generated"
+    env = os.environ.copy()
+    env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/opt/ms-playwright")
+    try:
+        r = subprocess.run(["python3", str(script)], cwd=WORK, env=env,
+                           capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"playwright_test.py timed out after {timeout}s"
+    status = "passed" if r.returncode == 0 else f"failed (exit {r.returncode})"
+    tail = (r.stdout + "\n" + r.stderr).strip()
+    return f"playwright_test.py {status}\n{tail[-1500:]}"
+
+
 def direct_call() -> str:
     """No compiled crew for this role: ask the model directly."""
     prompt = (f"You are the {ROLE} agent. Test the web service at {TARGET_URL} "
@@ -189,6 +218,140 @@ def store(collection: str, content: str, metadata: dict) -> None:
         conn.commit()
 
 
+# --- publish generated Playwright code to Odysseus ---------------------------
+
+PLAYWRIGHT_MARKERS = ("playwright", "sync_playwright", "async_playwright",
+                      "page.goto")
+_ODY_LANGUAGE = {".py": "python", ".ts": "typescript", ".js": "javascript"}
+
+
+def _read_env_file(path: Path) -> dict:
+    """Parse a shell-style KEY="value" file into a dict (best effort)."""
+    env = {}
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return env
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        env[key.strip()] = val.strip().strip('"').strip("'")
+    return env
+
+
+def _ody_request(opener, base: str, method: str, path: str, payload=None):
+    """JSON request through an authed opener; returns the decoded body."""
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(base + path, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    with opener.open(req, timeout=60) as resp:
+        body = resp.read()
+    return json.loads(body) if body else {}
+
+
+def playwright_files() -> list:
+    """Generated Playwright tests the e2e crew wrote into the scratch dir.
+
+    `playwright_test.py` is the filename the skill fixes as the contract, so it
+    is always included; any other .py/.ts/.js file that references playwright is
+    picked up too.
+    """
+    found = []
+    for p in sorted(WORK.rglob("*")):
+        if not p.is_file() or ".venv" in p.parts:
+            continue
+        if p.suffix not in (".py", ".ts", ".js"):
+            continue
+        try:
+            text = p.read_text(errors="ignore")
+        except OSError:
+            continue
+        if p.name == "playwright_test.py" or any(m in text for m in PLAYWRIGHT_MARKERS):
+            found.append(p)
+        if len(found) >= 20:
+            break
+    return found
+
+
+def publish_files(paths) -> None:
+    """Publish the given generated files to the Odysseus document library.
+
+    Documents are keyed by title, so re-publishing updates the same entry
+    instead of piling up new versions. Raises on any failure so callers decide
+    whether to swallow it.
+    """
+    creds = _read_env_file(ODYSSEUS_SECRETS)
+    password = creds.get("ODYSSEUS_ADMIN_PASSWORD", "")
+    if not password:
+        raise RuntimeError("odysseus creds unavailable")
+    base = creds.get("ODYSSEUS_URL", "http://127.0.0.1:7000").rstrip("/")
+    user = creds.get("ODYSSEUS_ADMIN_USER", "admin")
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    _ody_request(opener, base, "POST", "/api/auth/login",
+                 {"username": user, "password": password, "remember": True})
+    library = _ody_request(opener, base, "GET",
+                           "/api/documents/library?limit=50")
+    existing = {d.get("title"): d.get("id")
+                for d in library.get("documents", [])}
+    for path in paths:
+        content = path.read_text(errors="ignore")
+        title = f"Playwright: {path.name}"
+        language = _ODY_LANGUAGE.get(path.suffix, "text")
+        if existing.get(title):
+            _ody_request(opener, base, "PUT",
+                         f"/api/document/{existing[title]}",
+                         {"content": content})
+            print(f"odysseus: updated document {title}", flush=True)
+        else:
+            doc = _ody_request(opener, base, "POST", "/api/document",
+                               {"title": title, "language": language,
+                                "content": content})
+            existing[title] = doc.get("id")
+            print(f"odysseus: published document {title}", flush=True)
+
+
+def publish_to_odysseus() -> None:
+    """Publish the current generated Playwright code (best effort)."""
+    if harness_role() != "e2e":
+        return
+    files = playwright_files()
+    if not files:
+        print("no generated playwright code to publish", file=sys.stderr)
+        return
+    try:
+        publish_files(files)
+    except Exception as e:  # noqa: BLE001 - publishing must not break testing
+        print(f"odysseus publish failed: {e}", file=sys.stderr)
+
+
+def watch_playwright(stop_event) -> None:
+    """Publish generated code as it changes *while the crew is still running*.
+
+    crewai is synchronous and a full run can take many minutes, so without this
+    the generated test would only surface in Odysseus after the whole crew
+    finished. Republishing only when the file content changes avoids version
+    churn.
+    """
+    seen = {}
+    while not stop_event.is_set():
+        for p in playwright_files():
+            try:
+                digest = hashlib.sha256(p.read_bytes()).hexdigest()
+            except OSError:
+                continue
+            if seen.get(p) == digest:
+                continue
+            seen[p] = digest
+            try:
+                publish_files([p])
+            except Exception as e:  # noqa: BLE001
+                print(f"odysseus publish failed: {e}", file=sys.stderr)
+        stop_event.wait(10)
+
+
 def run_once() -> int:
     role = harness_role()
     defaults = DEFAULT_TUNING[role]
@@ -202,9 +365,25 @@ def run_once() -> int:
         store(ROLE, f"tuning rejected: {tuning} ({verdict})", {"verdict": verdict})
         return 1
 
+    stop_ev = None
+    watcher = None
+    if role == "e2e":
+        stop_ev = threading.Event()
+        watcher = threading.Thread(target=watch_playwright, args=(stop_ev,),
+                                   daemon=True)
+        watcher.start()
     report = run_crew()
+    if watcher is not None:
+        stop_ev.set()
+        watcher.join(timeout=15)
     print(report[-2000:], flush=True)
+    if role == "e2e":
+        result = run_playwright()
+        print(result, flush=True)
+        report = f"{report}\n\n--- playwright_test.py run ---\n{result}"
     store(ROLE, report, {"target": TARGET_URL, "tuning": tuning, "verdict": verdict})
+    if role == "e2e":
+        publish_to_odysseus()
     return 0
 
 

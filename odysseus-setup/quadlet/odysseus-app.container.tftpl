@@ -8,7 +8,7 @@ Requires=odysseus-searxng.service odysseus-chromadb.service
 Image=${app_image}
 ContainerName=odysseus-app
 # Host networking: the rootless container cannot reach host-loopback services
-# (the two phi-4-mini instances, SearXNG, ChromaDB) through pasta's gateway,
+# (the single phi-4-mini instance, SearXNG, ChromaDB) through pasta's gateway,
 # so the app shares the host net and talks to them on 127.0.0.1 directly.
 Network=host
 Volume=${odysseus_dir}/data:/app/data:z

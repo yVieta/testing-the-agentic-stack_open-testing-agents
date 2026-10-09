@@ -22,9 +22,9 @@ Slash commands:
   /exit      quit (Ctrl+D / Ctrl+C works too)
 
 Env vars honoured (defaults in parentheses):
-  MODEL_URL        base of the OpenAI-compatible API (http://127.0.0.1:18081/v1,
-                   the phi4-cli instance dedicated to this CLI; the crew-facing
-                   server stays on 18080)
+  MODEL_URL        base of the OpenAI-compatible API (http://127.0.0.1:18080/v1,
+                   the shared phi-4-mini instance that serves both the crews
+                   and this CLI)
   MODEL_NAME       model alias as served by llama-server (phi-4-mini)
   POSTGRES_DSN     full postgres DSN; else read from
                    /var/spool/aigents/database/secrets/credentials.env
@@ -274,7 +274,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test manager agent CLI")
     parser.add_argument("--once", help="ask a single question and exit")
     parser.add_argument("--model-url", default=os.environ.get(
-        "MODEL_URL", "http://127.0.0.1:18081/v1"), help="OpenAI-compatible API base")
+        "MODEL_URL", "http://127.0.0.1:18080/v1"), help="OpenAI-compatible API base")
     parser.add_argument("--model-name", default=os.environ.get("MODEL_NAME", "phi-4-mini"))
     parser.add_argument("--persona", default=str(AGENT_JSON), help="path to the agent JSON")
     parser.add_argument("--temp", type=float, default=0.2)
@@ -284,7 +284,7 @@ def main() -> int:
 
     read_dsn_from_env()
     persona = load_persona(Path(args.persona))
-    client = ModelClient(args.model_url or os.environ.get("MODEL_URL", "http://127.0.0.1:18081/v1"), args.model_name)
+    client = ModelClient(args.model_url or os.environ.get("MODEL_URL", "http://127.0.0.1:18080/v1"), args.model_name)
     store = Store()
 
     messages = [{"role": "system", "content": system_prompt(persona, args.model_name)}]

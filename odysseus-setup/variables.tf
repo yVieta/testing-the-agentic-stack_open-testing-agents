@@ -1,7 +1,7 @@
 variable "home_dir" {
   type        = string
-  description = "Home dir of the user that runs the Podman rootless user services."
-  default     = "/home/vieta"
+  description = "Home dir of the user that runs the Podman rootless user services. Leave empty (default) to resolve the real home of the user running tofu (pathexpand \"~\"), so storage paths are never hardcoded to a username; override with `-var home_dir=/home/x` when deploying through sudo or a dedicated service account."
+  default     = ""
 }
 
 variable "spool_root" {
@@ -78,19 +78,19 @@ variable "ntfy_port" {
 
 variable "llm_host" {
   type        = string
-  description = "Primary LLM host Odysseus scans for model discovery. The app runs with host networking, so 127.0.0.1 is the host."
-  default     = "127.0.0.1:18081"
+  description = "Primary LLM host Odysseus scans for model discovery. Since the model stack now runs a single phi-4-mini on 18080 (crews + interactive chat), everything points at it. The app runs with host networking, so 127.0.0.1 is the host."
+  default     = "127.0.0.1:18080"
 }
 
 variable "llm_hosts" {
   type        = string
-  description = "Additional LLM hosts, comma-separated (crew-facing instance)."
+  description = "Additional comma-separated LLM hosts. The single phi-4-mini is on `llm_host`; this stays the same value because the app scans both env vars — harmless duplicate, set to \"\" if your build tolerates an empty secondary."
   default     = "127.0.0.1:18080"
 }
 
 variable "research_llm_endpoint" {
   type        = string
-  description = "Explicit OpenAI-compatible endpoint for the research model (crew-facing phi-4-mini)."
+  description = "Explicit OpenAI-compatible endpoint for the research model (the single phi-4-mini)."
   default     = "http://127.0.0.1:18080/v1"
 }
 
