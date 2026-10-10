@@ -1,0 +1,22 @@
+# Declarative initial task queue for the MCP bus (rendered by mcp-setup).
+# The bus (worker/mcp_server.py --seed-jobs) inserts these exactly once, on a
+# fresh database, so a new deployment deterministically arrives at the same
+# job queue without any imperative task-assignment step. After first boot the
+# manager agent owns dispatch (assign_test_case / has_open_task on the bus).
+[
+  {
+    "role": "manager",
+    "test_case": "test the login for sqli and xss",
+    "instruction": "Assign this test case to the e2e engineer and the pentester over the MCP bus, monitor their runs, and consolidate the findings into the final report mailed to the report recipients."
+  },
+  {
+    "role": "e2e",
+    "test_case": "Run the standard Juice Shop end-to-end regression against the SUT: load the home page, register/login, browse the product catalogue, search, add an item to the basket and reach checkout. Assert there are no page or console errors and save the test as playwright_test.py.",
+    "instruction": "Use the e2e test worker role. Execute the test case against ${target_url} and publish the generated playwright_test.py to Odysseus."
+  },
+  {
+    "role": "pentester",
+    "test_case": "Run the standard Juice Shop security sweep against the SUT: fingerprint the app, probe the login for SQL injection and XSS, check the REST API and the /administration area, and record each finding with evidence and severity.",
+    "instruction": "Use the security tester role. Run the sweep against ${target_url} and record findings with evidence and severity."
+  }
+]

@@ -33,6 +33,7 @@ DEFAULT_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8765/mcp")
 TOOL_ASSIGN = "assign_test_case"
 TOOL_TASKS = "list_tasks"
 TOOL_NEXT = "get_next_task"
+TOOL_OPEN = "has_open_task"
 TOOL_SUBMIT = "submit_findings"
 TOOL_FINDINGS = "get_findings"
 TOOL_STATUS = "get_agent_status"
@@ -129,10 +130,18 @@ def get_next_task(role: str, url: str | None = None) -> dict | None:
     return payload.get("task") or None
 
 
+def has_open_task(role: str, test_case: str = "", url: str | None = None) -> str:
+    """'yes'/'no' — does ``role`` already hold an open (pending/running) task,
+    optionally for ``test_case``?"""
+    return call_tool(TOOL_OPEN, {"role": role, "test_case": test_case}, url=url)
+
+
 def submit_findings(role: str, task_id: int | None, findings: str,
-                    kind: str = "findings", url: str | None = None) -> str:
+                    kind: str = "findings", success: bool = True,
+                    url: str | None = None) -> str:
     return call_tool(TOOL_SUBMIT, {"role": role, "task_id": task_id,
-                                   "findings": findings, "kind": kind}, url=url)
+                                   "findings": findings, "kind": kind,
+                                   "success": success}, url=url)
 
 
 def get_findings(role: str = "", limit: int = 10, url: str | None = None) -> str:

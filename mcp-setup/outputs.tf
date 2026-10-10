@@ -9,10 +9,11 @@ output "mcp_unit" {
 }
 
 output "state" {
-  description = "Where the SQLite bus state lives."
+  description = "Where the SQLite bus state and the declarative job seed live."
   value = {
-    dir = local.state_dir
-    db  = local.db_path
+    dir       = local.state_dir
+    db        = local.db_path
+    seed_file = local.seed_file
   }
 }
 

@@ -62,6 +62,21 @@ def _call(name: str, arguments: dict, timeout: float = 60.0) -> str:
     return text or "(no content)"
 
 
+def _require_manager(tool: str, what: str, arguments: dict) -> str:
+    """Only the test manager crew may start/stop agent services.
+
+    The workers would otherwise be able to shut each other down mid-run (a
+    runaway e2e/pentester crew calling action=stop on a sibling), which breaks
+    the team's liveness. The manager is still free to control every unit.
+    """
+    me = os.environ.get("CREW_ROLE", "")
+    if me != "test_manager_agent":
+        return ("`%s` refused: only the test manager may %s "
+                "(this crew runs as %r) — ask the manager to do it") % (
+                    what, what, me)
+    return _call(tool, arguments)
+
+
 class AigentsBusInput(BaseModel):
     """Arguments for the bus tool (one action per call)."""
 
@@ -94,8 +109,10 @@ class AigentsBusTool(BaseTool):
         "they already found; action=submit shares your own findings; "
         "action=note publishes a test-results note to the Odysseus web UI; "
         "action=mail sends the final report as mail through the Odysseus mail "
-        "function; action=start/stop/get_status control the agent services; "
-        "action=tasks lists the assigned test-case tasks; "
+        "function; action=start/stop/get_status control the agent services "
+        "(start/stop are test-manager only); action=tasks lists the assigned "
+        "test-case tasks; action=open checks whether a role already has an open "
+        "task for a case; "
         "action=process/publish show/publish the live testing-process document."
     )
     args_schema: type[BaseModel] = AigentsBusInput
@@ -107,9 +124,13 @@ class AigentsBusTool(BaseTool):
         if action in ("get_status", "status"):
             return _call("get_agent_status", {"role": role})
         if action == "start":
-            return _call("start_agent", {"role": role or "all"})
+            return _require_manager(
+                "start_agent", f"start agent services {role!r}",
+                {"role": role or "all"})
         if action == "stop":
-            return _call("stop_agent", {"role": role or "all"})
+            return _require_manager(
+                "stop_agent", f"stop agent services {role!r}",
+                {"role": role or "all"})
         if action in ("assign", "assign_test_case", "case"):
             return _call("assign_test_case", {
                 "role": role, "test_case": test_case,
@@ -117,6 +138,8 @@ class AigentsBusTool(BaseTool):
             })
         if action in ("tasks", "list_tasks"):
             return _call("list_tasks", {"role": role, "limit": limit})
+        if action in ("open", "has_open_task"):
+            return _call("has_open_task", {"role": role, "test_case": test_case})
         if action in ("next", "get_next_task"):
             return _call("get_next_task", {"role": role})
         if action in ("findings", "get_findings", "knowledge"):
@@ -148,3 +171,11 @@ class AigentsBusTool(BaseTool):
             f"unknown action '{action}' — use get_status/start/stop/assign/"
             "tasks/next/findings/submit/process/publish/note/notes/mail"
         )
+
+
+# crewai >= 1.15 doesn't put modules loaded from a JSON project's tools/ dir
+# into sys.modules; pydantic then can't resolve the deferred `type[BaseModel]`
+# forward ref in args_schema and construction fails with "not fully defined".
+# Rebuild with an explicit namespace so the class is concrete under both the
+# crewai JSON loader and a regular Python import.
+AigentsBusTool.model_rebuild(force=True, _types_namespace=globals())

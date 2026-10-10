@@ -1,0 +1,8 @@
+# --- deploy/ is the single declarative controller ---------------------------
+# State and provider caches are machine-local artifacts, never committed.
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate.backup
+crash.log
+*.log

@@ -26,8 +26,20 @@ variable "bind_address" {
 
 variable "app_image" {
   type        = string
-  description = "Odysseus workspace image (published by CI on every push to main/dev)."
+  description = "Odysseus workspace image (published by CI on every push to main/dev). Overridden when build_app_image=true."
   default     = "ghcr.io/odysseus-dev/odysseus:latest"
+}
+
+variable "build_app_image" {
+  type        = bool
+  description = "Build the Odysseus image from the local source (../odysseus) instead of pulling the upstream image. The local source contains the aigents-bus MCP server for test manager integration."
+  default     = false
+}
+
+variable "app_image_tag" {
+  type        = string
+  description = "Tag for the locally built Odysseus image."
+  default     = "localhost/odysseus:aigents"
 }
 
 variable "chromadb_image" {

@@ -28,6 +28,48 @@ resource "random_password" "searxng_secret" {
   special = false
 }
 
+# --- local odysseus image build ------------------------------------------------
+# When build_app_image=true, build the image from the repo's vendored odysseus/
+# source (which includes the aigents-bus MCP server for test manager integration).
+# This makes the entire stack repo-owned and declarative.
+
+locals {
+  # External odysseus repo (cloned separately as a sibling of this repo)
+  # Use relative path from odysseus-setup: ../../odysseus -> /var/spool/aigents/odysseus
+  odysseus_source_dir = "${path.root}/../../odysseus"
+  use_local_image     = var.build_app_image
+  effective_app_image = var.build_app_image ? var.app_image_tag : var.app_image
+}
+
+resource "null_resource" "build_app_image" {
+  # Only run when build_app_image=true
+  count = var.build_app_image ? 1 : 0
+
+  triggers = {
+    # Rebuild when source files change (key files that affect the build)
+    dockerfile   = filesha256("${local.odysseus_source_dir}/Dockerfile")
+    entrypoint   = filesha256("${local.odysseus_source_dir}/docker/entrypoint.sh")
+    app_py       = filesha256("${local.odysseus_source_dir}/app.py")
+    builtin_mcp  = filesha256("${local.odysseus_source_dir}/src/builtin_mcp.py")
+    aigents_bus  = filesha256("${local.odysseus_source_dir}/mcp_servers/aigents_bus_server.py")
+    requirements = filesha256("${local.odysseus_source_dir}/requirements.txt")
+    pyproject    = filesha256("${local.odysseus_source_dir}/pyproject.toml")
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      echo "Building Odysseus image from ${local.odysseus_source_dir} -> ${var.app_image_tag}"
+      export XDG_RUNTIME_DIR=/run/user/$(id -u)
+      podman build \
+        --tag "${var.app_image_tag}" \
+        --file "${local.odysseus_source_dir}/Dockerfile" \
+        "${local.odysseus_source_dir}"
+      echo "Build complete: ${var.app_image_tag}"
+    EOT
+  }
+}
+
 locals {
   admin_password = var.admin_password != "" ? var.admin_password : random_password.admin_password.result
 }
@@ -137,7 +179,7 @@ resource "local_file" "app_quadlet" {
   filename = "${local.expanded_quadlet_dir}/odysseus-app.container"
 
   content = templatefile("${path.module}/quadlet/odysseus-app.container.tftpl", {
-    app_image             = var.app_image
+    app_image             = local.effective_app_image
     bind_address          = var.bind_address
     app_port              = var.app_port
     odysseus_dir          = local.odysseus_dir
@@ -162,6 +204,18 @@ resource "local_file" "app_quadlet" {
     imap_user             = var.imap_user
     imap_password         = var.imap_password
     email_from            = var.email_from
+  })
+}
+
+# Self-healing drop-in for the app unit: recreates every host-backed volume
+# source on each `systemd --user start/restart`, so a cleanup or manual
+# restart cannot wedge the service (podman refuses to start on a missing
+# bind source). Rendered next to the quadlet file.
+resource "local_file" "app_quadlet_dropin" {
+  filename = "${local.expanded_quadlet_dir}/odysseus-app.container.d/override.conf"
+
+  content = templatefile("${path.module}/quadlet/odysseus-app.container.d/override.conf.tftpl", {
+    odysseus_dir = local.odysseus_dir
   })
 }
 
@@ -201,6 +255,7 @@ resource "local_file" "ntfy_quadlet" {
 resource "null_resource" "start_odysseus" {
   depends_on = [
     local_file.app_quadlet,
+    local_file.app_quadlet_dropin,
     local_file.chromadb_quadlet,
     local_file.searxng_quadlet,
     local_file.ntfy_quadlet,
@@ -227,7 +282,8 @@ resource "null_resource" "start_odysseus" {
       if [ "${var.enable_linger}" = "true" ]; then
         loginctl enable-linger "$user" || true
       fi
-      ${join("\n", [for img in [var.app_image, var.chromadb_image, var.searxng_image, var.ntfy_image] : "        podman image exists ${img} 2>/dev/null || podman pull ${img}"])}
+      # Only pull images that aren't locally built (localhost/* tags)
+      ${join("\n", [for img in [local.effective_app_image, var.chromadb_image, var.searxng_image, var.ntfy_image] : "        case ${img} in\n          localhost/*) echo \"Using local image ${img}, skipping pull\" ;;\n          *) podman image exists ${img} 2>/dev/null || podman pull ${img} ;;\n        esac"])}
       systemctl --user daemon-reload
       ${join("\n", [for s in local.services : "        if [ \"${var.enable_on_boot}\" = \"true\" ]; then systemctl --user enable ${s}.service 2>/dev/null || true; fi\n        systemctl --user restart ${s}.service 2>/dev/null || true"])}
     EOT

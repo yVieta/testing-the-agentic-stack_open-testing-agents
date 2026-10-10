@@ -18,12 +18,16 @@ Environment=MODEL_FAST_URL=${model_fast_url}
 Environment=MODEL_FAST_NAME=${model_fast_name}
 Environment=TARGET_URL=${target_url}
 Environment=MCP_URL=${mcp_url}
-Environment=RUN_INTERVAL=900
+Environment=RUN_INTERVAL=${run_interval}
 Exec=python3 /repo/worker/run_agent.py
 
 [Service]
 Restart=always
 RestartSec=15
+# Self-healing bind sources: podman refuses to start when a bind mount source
+# is missing. Recreate the odysseus secrets dir and the credentials file on
+# every start, so a wiped path (or a manual cleanup) cannot wedge the agent.
+ExecStartPre=/bin/sh -c 'mkdir -p "$(dirname "${credential_file}")" "${odysseus_secrets_dir}" && chmod 0700 "${odysseus_secrets_dir}" && [ -e "${credential_file}" ] || : > "${credential_file}"'
 
 [Install]
 WantedBy=default.target

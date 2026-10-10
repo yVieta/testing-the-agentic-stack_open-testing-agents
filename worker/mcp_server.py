@@ -43,7 +43,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -71,6 +71,15 @@ DEFAULT_UNIT_PREFIX = os.environ.get("MCP_UNIT_PREFIX", "agent-")
 # Default report recipient(s) for the Odysseus mail function. May also be set
 # as REPORT_MAIL_TO in the odysseus credentials.env file; the env var wins.
 DEFAULT_REPORT_MAIL_TO = os.environ.get("REPORT_MAIL_TO", "")
+# Declarative task seed: path to a JSON file of initial jobs ({role, test_case,
+# instruction}) inserted on first boot, i.e. when the tasks table is empty. It
+# is rendered by mcp-setup from the repo, so a fresh deploy deterministically
+# arrives at the same task queue without any imperative assignment step.
+DEFAULT_SEED_JOBS = os.environ.get("SEED_JOBS", "")
+# How long a `running` task may stay claimed. A worker killed mid-run leaves its
+# task `running` forever, which blocks re-dispatch; after this timeout the bus
+# recycles it to `pending` so the role picks it up again. Env TASK_CLAIM_TIMEOUT.
+STALE_TASK_SECONDS = int(os.environ.get("TASK_CLAIM_TIMEOUT", "1800"))
 PROCESS_TITLE = "Testing process"
 # Label of the notes the agents write into the Odysseus Notes panel. Stable per
 # role title + this label is the dedupe key: re-publishing the same title
@@ -81,6 +90,12 @@ MAX_INLINE = 4000  # cap on a findings blob embedded in the process doc
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def now_offset(seconds: int) -> str:
+    """UTC ISO timestamp shifted by ``seconds`` (negative = in the past)."""
+    return (datetime.now(timezone.utc) +
+            timedelta(seconds=seconds)).isoformat(timespec="seconds")
 
 
 def _expand(role: str) -> tuple:
@@ -106,10 +121,12 @@ def _read_env_file(path: Path) -> dict:
 class Bus:
     """SQLite-backed knowledge + control bus; every method returns text."""
 
-    def __init__(self, db_path: str, unit_prefix: str, odysseus_secrets: str):
+    def __init__(self, db_path: str, unit_prefix: str, odysseus_secrets: str,
+                 seed_jobs: str = ""):
         self.db_path = db_path
         self.unit_prefix = unit_prefix
         self.odysseus_secrets = Path(odysseus_secrets)
+        self.seed_jobs = seed_jobs
 
     # --- storage ------------------------------------------------------------
 
@@ -144,6 +161,46 @@ class Bus:
                 );
                 """
             )
+            self._seed_tasks(conn)
+
+    def _seed_tasks(self, conn) -> None:
+        """Insert the declarative initial jobs — and only on first boot.
+
+        The seed file (written by mcp-setup from the repo) is the single source
+        of truth for the initial task queue. It is applied exactly once, when
+        the tasks table is still empty, so a wiped/rebuilt bus arrives at the
+        same queue without any imperative assignment; once the table holds any
+        row the seed is never re-applied (the manager owns dispatch from then
+        on).
+        """
+        if not self.seed_jobs:
+            return
+        n = conn.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()["n"]
+        if n > 0:
+            return
+        try:
+            jobs = json.loads(Path(self.seed_jobs).read_text())
+        except (OSError, ValueError) as exc:
+            print(f"mcp-bus: seed {self.seed_jobs} not loaded: {exc}",
+                  file=sys.stderr)
+            return
+        if not isinstance(jobs, list) or not jobs:
+            return
+        inserted = 0
+        created = now()
+        for job in jobs:
+            role = str(job.get("role", "")).strip().lower()
+            case = str(job.get("test_case", "")).strip()
+            if role not in ROLES or not case:
+                continue
+            conn.execute(
+                "INSERT INTO tasks (role, test_case, instruction, status, created_at) "
+                "VALUES (?, ?, ?, 'pending', ?)",
+                (role, case, str(job.get("instruction", "") or "").strip(), created))
+            inserted += 1
+        if inserted:
+            print(f"mcp-bus: seeded {inserted} initial task(s) from {self.seed_jobs}",
+                  flush=True)
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -257,6 +314,15 @@ class Bus:
             return json.dumps({"task": None, "error": f"unknown role '{role}'"})
         with self._db() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            # Self-healing: a `running` task whose claim expired (worker killed
+            # or restarted mid-run) is recycled to `pending` so the role picks
+            # it up again — the bus owns task state, no manual sqlite surgery.
+            conn.execute(
+                "UPDATE tasks SET status = 'pending', started_at = NULL "
+                "WHERE role = ? AND status = 'running' "
+                "AND started_at IS NOT NULL "
+                "AND started_at <= ?",
+                (role, now_offset(-STALE_TASK_SECONDS)))
             row = conn.execute(
                 "SELECT * FROM tasks WHERE role = ? AND status = 'pending' "
                 "ORDER BY id ASC LIMIT 1", (role,)).fetchone()
@@ -268,8 +334,22 @@ class Bus:
             task["status"] = "running"
         return json.dumps({"task": task})
 
+    def has_open_task(self, role: str, test_case: str = "") -> str:
+        roles = _expand(role)
+        if not roles:
+            return f"unknown role '{role}'"
+        tc = str(test_case or "").strip().lower()
+        with self._db() as conn:
+            placeholders = ",".join("?" for _ in roles)
+            row = conn.execute(
+                f"SELECT COUNT(*) AS n FROM tasks WHERE role IN ({placeholders}) "
+                "AND status IN ('pending','running')"
+                " AND (? = '' OR lower(test_case) = lower(?))",
+                (*roles, tc, tc)).fetchone()
+            return "yes" if row["n"] > 0 else "no"
+
     def submit_findings(self, role: str, task_id, findings: str,
-                        kind: str = "findings") -> str:
+                        kind: str = "findings", success: bool = True) -> str:
         role = str(role).strip().lower()
         if role not in ROLES:
             return f"unknown role '{role}'"
@@ -283,10 +363,13 @@ class Bus:
                 (role, int(task_id) if task_id not in (None, "", "null") else None,
                  str(kind or "findings"), findings, now()))
             if task_id not in (None, "", "null"):
+                # success=False records the run honestly instead of closing a
+                # failed crew run as 'done' (the manager's monitoring sees it).
                 conn.execute(
-                    "UPDATE tasks SET status = 'done', finished_at = ?, result = ? "
+                    "UPDATE tasks SET status = ?, finished_at = ?, result = ? "
                     "WHERE id = ? AND role = ?",
-                    (now(), findings, int(task_id), role))
+                    ("done" if success else "failed", now(), findings,
+                     int(task_id), role))
         return f"recorded {kind} for `{role}` ({len(findings)} chars)"
 
     def get_findings(self, role: str = "", limit: int = 10) -> str:
@@ -570,9 +653,25 @@ TOOLS = [
         },
     },
     {
+        "name": "has_open_task",
+        "description": ("Tell whether a role already has an open (pending or "
+                        "running) task — optionally filtered to a specific test "
+                        "case. Lets the test manager avoid dispatching duplicate "
+                        "work to the team."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "enum": list(ROLES)},
+                "test_case": {"type": "string", "default": ""},
+            },
+            "required": ["role"],
+        },
+    },
+    {
         "name": "submit_findings",
         "description": ("Share a role's findings/knowledge on the bus and close "
-                        "the task. This is how the agents exchange knowledge."),
+                        "the task (done on success, failed on a broken run). "
+                        "This is how the agents exchange knowledge."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -580,6 +679,8 @@ TOOLS = [
                 "task_id": {"type": "integer"},
                 "findings": {"type": "string"},
                 "kind": {"type": "string", "default": "findings"},
+                "success": {"type": "boolean", "default": True,
+                            "description": "false records the run as failed"},
             },
             "required": ["role", "findings"],
         },
@@ -711,9 +812,11 @@ def _dispatch(bus: Bus, name: str, args: dict) -> dict:
         "list_tasks": lambda: bus.list_tasks(
             arg("role", ""), arg("status", ""), arg("limit", 20)),
         "get_next_task": lambda: bus.get_next_task(arg("role", "")),
+        "has_open_task": lambda: bus.has_open_task(
+            arg("role", ""), arg("test_case", "")),
         "submit_findings": lambda: bus.submit_findings(
             arg("role", ""), arg("task_id"), arg("findings", ""),
-            arg("kind", "findings")),
+            arg("kind", "findings"), bool(arg("success", True))),
         "get_findings": lambda: bus.get_findings(arg("role", ""), arg("limit", 10)),
         "get_agent_status": lambda: bus.get_agent_status(arg("role", "")),
         "start_agent": lambda: bus.start_agent(arg("role", "all")),
@@ -856,9 +959,11 @@ def main(argv=None) -> int:
     parser.add_argument("--db", default=DEFAULT_DB)
     parser.add_argument("--odysseus-secrets", default=DEFAULT_ODYSSEUS_SECRETS)
     parser.add_argument("--unit-prefix", default=DEFAULT_UNIT_PREFIX)
+    parser.add_argument("--seed-jobs", default=DEFAULT_SEED_JOBS)
     args = parser.parse_args(argv)
 
-    bus = Bus(args.db, args.unit_prefix, args.odysseus_secrets)
+    bus = Bus(args.db, args.unit_prefix, args.odysseus_secrets,
+              seed_jobs=args.seed_jobs)
     bus.init()
     httpd = ThreadingHTTPServer((args.host, args.port), _make_handler(bus))
     print(f"{SERVER_NAME} listening on http://{args.host}:{args.port}/mcp "

@@ -121,7 +121,39 @@ below. The POSIX script `start-services.sh` wraps them in dependency order:
 ./start-services.sh restart       # stop, then start
 ./start-services.sh status        # print each module's outputs
 ./start-services.sh start model-setup agent-setup   # target a subset
+./start-services.sh --parallel start                 # apply start in waves, concurrently
 ```
+
+`agent-setup` also accepts `run_interval` (seconds between an agent's run
+cycles; default `900` = quiet production cadence, `60` makes the team claim a
+freshly assigned test case within a minute):
+
+```sh
+tofu -chdir=agent-setup apply -var run_interval=60
+# or, with just:  nix develop -c just pace 60
+```
+
+A full `just start`/`redeploy` applies the default `900` again.
+
+#### How fast is a (re)start?
+
+Each module's `tofu apply` only re-provisions what changed — the triggers are
+content hashes of the rendered units and of the worker scripts / bus server —
+so unchanged services are **not** restarted. Measured on this host:
+
+| Path | What runs | Typical time |
+|------|-----------|--------------|
+| `just start` | converges; only changed modules restart (model/SUT untouched on a code round-trip) | seconds–~9 min |
+| `just redeploy` | code-only: bus + agents + Odysseus, model/SUT stay up | ~9 min |
+| `just redeploy-fast` | same, apply in waves (bus, then agents + Odysseus in parallel) | ~5 min |
+| `just start-fast` | full boot in waves (model+sut+bus, then agents+Odysseus) | ~18 min |
+| `just restart` | full clean cycle: stop all, then start all (model boots 2 llama.cpp servers) | ~22–25 min |
+
+The floor for a full `restart` is the model: two llama.cpp instances
+(phi-4-mini on :18080 with 99 GPU layers, phi-mini-moe on :18081) mmap ~7.5 GB
+of GGUFs and must become healthy before anything else depends on them. For
+pushing code changes, `just redeploy`/`redeploy-fast` is the right tool — the
+model keeps serving while the bus, agents and Odysseus reload.
 
 Or drive a module directly:
 
@@ -270,6 +302,12 @@ MCP bus** (`worker/mcp_server.py`) — not only through the worker:
 The worker still injects the live task + findings into every crew's inputs and,
 for the manager, also the live **agent status and task list**, so monitoring
 works even when the model does not call the tool itself.
+
+Task accounting is honest: a run that crashes (`crewai failed: …`) or whose
+Playwright test errors or times out closes its assigned task as status
+`failed`, not `done` (`submit_findings` `success=false`) — the manager's
+`tasks`/`get_status` views and the final report then reflect actual results
+instead of pretending a broken run passed.
 
 ## Architecture
 

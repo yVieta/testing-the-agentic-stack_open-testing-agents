@@ -1,0 +1,9 @@
+# Quadlet drop-in for the odysseus-app unit (Rendered by odysseus-setup).
+#
+# Self-healing bind mounts: podman refuses to start when a bind source is
+# missing ("statfs ... no such file or directory"), and the terraform
+# odysseus_dirs step only re-runs when its trigger changes. Recreating every
+# host-backed volume here means a dir cleanup or a manual restart can never
+# wedge the app service.
+[Service]
+ExecStartPre=/bin/sh -c 'mkdir -p ${odysseus_dir}/data/ssh ${odysseus_dir}/data/huggingface ${odysseus_dir}/data/local ${odysseus_dir}/logs ${odysseus_dir}/secrets && chmod 0700 ${odysseus_dir}/secrets'

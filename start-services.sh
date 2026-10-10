@@ -9,6 +9,21 @@
 #   start: model-setup -> sut-setup -> mcp-setup -> agent-setup -> odysseus-setup
 #   stop : the exact reverse (odysseus-setup -> agent-setup -> mcp-setup -> sut-setup -> model-setup)
 #
+# `--parallel` (or `-P`) rearranges `start` into dependency waves applied
+# concurrently, which is faster when several modules were changed at once:
+#
+#   wave 1: model-setup, sut-setup, mcp-setup   (independent)
+#   wave 2: agent-setup, odysseus-setup         (both need the model up)
+#
+# A subset given with `--parallel` is grouped the same way; modules whose
+# dependencies fall outside the selection are treated as already satisfied.
+#
+# `tofu apply` only restarts a module whose triggers changed (rendered units and
+# content hashes of the worker scripts/bus server). So a plain `start` already
+# skips the model and SUT when only agent/bus/Odysseus code changed — a "code
+# round-trip" restart of just those three is ~9 min (parallel: ~5 min) instead
+# of the ~22-25 min a full `restart` (stop + start) takes.
+#
 # Stopping keeps all state: podman images, GGUF weights, the Postgres data dir
 # and the Odysseus/agent volumes are untouched. `tofu destroy` is a separate,
 # destructive operation and is intentionally not wrapped here.
@@ -27,6 +42,12 @@
 #   ./start-services.sh restart         # stop then start
 #   ./start-services.sh status          # show tofu outputs for each module
 #   ./start-services.sh start model-setup agent-setup   # a subset, in order
+#   ./start-services.sh --parallel start                 # apply in waves, concurrently
+#   ./start-services.sh -P start mcp-setup agent-setup odysseus-setup
+#
+# With --parallel, `start` runs the modules in dependency waves (see the header
+# comment) and reports each module's own duration; `stop` always stays in the
+# safe reverse order.
 #
 # Environment:
 #   TOFU=/usr/bin/tofu        # override the binary (defaults to tofu, else terraform)
@@ -66,13 +87,19 @@ usage() {
 start-services.sh — declaratively start (or stop) every self-hosted service.
 
 Usage:
-  ./start-services.sh [start|stop|restart|status] [module ...]
+  ./start-services.sh [--parallel] [start|stop|restart|status] [module ...]
 
 Actions:
   start     apply service_state=running to every module (default)
   stop      apply service_state=stopped, in reverse startup order
   restart   stop, then start
   status    print the tofu outputs for each module
+
+Options:
+  --parallel  apply the start modules in dependency waves, concurrently
+              (wave 1: model+sut+mcp; wave 2: agents+odysseus). Restart/stop
+              still stop in reverse startup order. Faster than the sequential
+              loop when several modules changed at once.
 
 Modules (startup order):
   model-setup  sut-setup  mcp-setup  agent-setup  odysseus-setup
@@ -99,7 +126,19 @@ Environment:
 EOF
 }
 
-# --- parse the action ---------------------------------------------------------
+# --- parse the flags and the action ------------------------------------------
+# --parallel / -P switches `start` into dependency-wave mode (see header).
+FLAG_PARALLEL=0
+_rest=""
+for _a in "$@"; do
+  case "$_a" in
+    --parallel|-P) FLAG_PARALLEL=1 ;;
+    *) _rest="$_rest $_a" ;;
+  esac
+done
+# shellcheck disable=SC2086  # module names are plain words
+set -- $_rest
+
 action=${1:-start}
 if [ "$#" -gt 0 ]; then
   shift
@@ -109,8 +148,12 @@ case "$action" in
   start|up|running)  action=start ;;
   stop|down|stopped) action=stop ;;
   restart)
-    "$SELF" stop "$@"
-    exec "$SELF" start "$@"
+    _pf=""
+    [ "$FLAG_PARALLEL" = 1 ] && _pf="--parallel"
+    # shellcheck disable=SC2086
+    "$SELF" $_pf stop "$@"
+    # shellcheck disable=SC2086
+    exec "$SELF" $_pf start "$@"
     ;;
   status|state)      action=status ;;
   -h|--help|help)    usage; exit 0 ;;
@@ -325,11 +368,141 @@ run_start() {
 }
 
 # =============================================================================
+# Parallel start: apply the selected modules in dependency waves, running the
+# modules of each wave concurrently. Wave 1 always holds the independent
+# modules (model-setup, sut-setup, mcp-setup); wave 2 holds agent-setup and
+# odysseus-setup, which both expect the model stack to be up. For subset runs,
+# a dependency outside the selection counts as already satisfied.
+# =============================================================================
+
+_module_deps() { # module -> space separated dependencies (or empty)
+  case "$1" in
+    agent-setup|odysseus-setup) echo "model-setup" ;;
+    *) echo "" ;;
+  esac
+}
+
+run_parallel_start() {
+  # Preserve the canonical startup order for whatever was selected.
+  _selected=""
+  for _m in $ALL_MODULES; do
+    for _s in $MODULES; do
+      if [ "$_m" = "$_s" ]; then
+        _selected="$_selected $_m"
+        break
+      fi
+    done
+  done
+  if [ -z "$_selected" ]; then
+    echo "start-services: nothing to start" >&2
+    return 0
+  fi
+
+  _logdir=${START_LOG_DIR:-${TMPDIR:-/tmp}/aigents-start-logs}
+  mkdir -p "$_logdir" 2>/dev/null || true
+  printf '  parallel waves; apply logs: %s\n' "$_logdir" >&2
+
+  _start_ts=$(date +%s)
+  _done=""
+  _wave=0
+  while :; do
+    # Which selected, not-yet-done modules have all their deps satisfied?
+    _wave_mods=""
+    for _m in $_selected; do
+      case " $_done " in
+        *" $_m "*) continue ;;
+      esac
+      _sat=1
+      for _d in $(_module_deps "$_m"); do
+        case " $_done " in
+          *" $_d "*) ;;
+          *) _sat=0 ;;
+        esac
+      done
+      [ "$_sat" = 1 ] && _wave_mods="$_wave_mods $_m"
+    done
+    [ -n "$_wave_mods" ] || break
+    _wave=$((_wave + 1))
+
+    printf '  wave %d: %s\n' "$_wave" "$(printf '%s' "$_wave_mods" | sed 's/^ //')" >&2
+
+    for _m in $_wave_mods; do
+      _dir="$SCRIPT_DIR/$_m"
+      if [ ! -d "$_dir" ]; then
+        echo "start-services: no such module '$_m' under $SCRIPT_DIR" >&2
+        exit 1
+      fi
+      _log="$_logdir/$_m.log"
+      _rcfile="$_logdir/$_m.rc"
+      rm -f "$_rcfile"
+      date +%s >"$_logdir/$_m.ts"
+      (
+        _rc=0
+        # shellcheck disable=SC2086  # TOFU_ARGS is intentionally word-split
+        "$TOFU_BIN" -chdir="$_dir" apply \
+          -input=false -auto-approve \
+          -var service_state=running $TOFU_ARGS >"$_log" 2>&1 || _rc=$?
+        echo "$_rc" >"$_rcfile"
+      ) &
+    done
+
+    # Poll the per-module rc markers until this wave has finished. Snapshot a
+    # module's own end time the moment its apply exits so durations stay
+    # per-module even though the wave runs concurrently.
+    while :; do
+      _still=""
+      for _m in $_wave_mods; do
+        if [ -s "$_logdir/$_m.rc" ]; then
+          [ -f "$_logdir/$_m.done_ts" ] || date +%s >"$_logdir/$_m.done_ts"
+        else
+          _still="$_still $_m"
+        fi
+      done
+      [ -z "$_still" ] && break
+      if [ "$_use_bar" = 1 ]; then
+        _el=$(( $(date +%s) - _start_ts ))
+        printf '\r  wave %d  running:%-22s elapsed %s  ' "$_wave" \
+          "$(printf '%s' "$_still" | sed 's/^ //')" "$(_fmt_dur "$_el")" >&2
+      fi
+      sleep 1
+    done
+    wait 2>/dev/null || true
+
+    _wave_failed=0
+    for _m in $_wave_mods; do
+      _rc=$(sed -n '1p' "$_logdir/$_m.rc" 2>/dev/null || echo 1)
+      _ts=$(sed -n '1p' "$_logdir/$_m.ts" 2>/dev/null)
+      [ -n "$_ts" ] || _ts=$_start_ts
+      _done_ts=$(sed -n '1p' "$_logdir/$_m.done_ts" 2>/dev/null)
+      [ -n "$_done_ts" ] || _done_ts=$(date +%s)
+      _obs=$(( _done_ts - _ts ))
+      _eta_store "$_m" "$_obs"
+      if [ "$_rc" = 0 ]; then
+        printf '\r%-100s\n' "  [done] $_m in $(_fmt_dur "$_obs")" >&2
+      else
+        _wave_failed=1
+        printf '\r%-100s\n' "  [failed] $_m (exit $_rc) - log: $_logdir/$_m.log" >&2
+        cat "$_logdir/$_m.log" >&2
+      fi
+    done
+    [ "$_wave_failed" = 1 ] && exit 1
+    _done="$_done$_wave_mods"
+  done
+
+  _dur=$(( $(date +%s) - _start_ts ))
+  printf '\r%-100s\n' "  all modules started in $(_fmt_dur "$_dur")" >&2
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 case "$action" in
   start)
-    run_start
+    if [ "$FLAG_PARALLEL" = 1 ]; then
+      run_parallel_start
+    else
+      run_start
+    fi
     ;;
   stop)
     for module in $MODULES; do

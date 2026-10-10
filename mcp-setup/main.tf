@@ -7,6 +7,7 @@ locals {
   odysseus_secrets_dir = var.odysseus_secrets_dir != "" ? var.odysseus_secrets_dir : "${var.spool_root}/odysseus/secrets"
   state_dir            = "${var.spool_root}/mcp"
   db_path              = "${local.state_dir}/mcp.db"
+  seed_file            = "${local.state_dir}/seed-tasks.json"
   server               = "${local.repo_dir}/worker/mcp_server.py"
   mcp_url              = "http://${var.mcp_host}:${var.mcp_port}${var.mcp_path}"
 }
@@ -21,6 +22,18 @@ resource "null_resource" "state_dir" {
   provisioner "local-exec" {
     command = "mkdir -p \"${local.state_dir}\""
   }
+}
+
+# --- declarative initial task queue -----------------------------------------
+# Rendered from the repo; the bus applies it once, on a fresh DB, so the whole
+# team converges on its jobs without any manual assignment.
+resource "local_file" "bus_seed" {
+  filename        = local.seed_file
+  file_permission = "0644"
+
+  content = templatefile("${path.module}/seeds/tasks.json.tftpl", {
+    target_url = var.target_url
+  })
 }
 
 # --- systemd user unit: the MCP bus runs on the host, not in a container ----
@@ -47,7 +60,8 @@ resource "local_file" "mcp_unit" {
     Environment=MCP_UNIT_PREFIX=${var.unit_prefix}
     Environment=REPORT_MAIL_TO=${var.report_mail_to}
     Environment=ODYSSEUS_SECRETS=${local.odysseus_secrets_dir}/credentials.env
-    ExecStart=${var.python_bin} ${local.server} --host ${var.mcp_host} --port ${var.mcp_port} --db ${local.db_path} --odysseus-secrets ${local.odysseus_secrets_dir}/credentials.env --unit-prefix ${var.unit_prefix}
+    Environment=SEED_JOBS=${local.seed_file}
+    ExecStart=${var.python_bin} ${local.server} --host ${var.mcp_host} --port ${var.mcp_port} --db ${local.db_path} --odysseus-secrets ${local.odysseus_secrets_dir}/credentials.env --unit-prefix ${var.unit_prefix} --seed-jobs ${local.seed_file}
     Restart=on-failure
     RestartSec=5
 
@@ -61,11 +75,13 @@ resource "local_file" "mcp_unit" {
 resource "null_resource" "start_bus" {
   depends_on = [
     local_file.mcp_unit,
+    local_file.bus_seed,
     null_resource.state_dir,
   ]
 
   triggers = {
     unit          = local_file.mcp_unit.content
+    seed          = local_file.bus_seed.content
     server        = filesha256(local.server)
     service_state = var.service_state
   }

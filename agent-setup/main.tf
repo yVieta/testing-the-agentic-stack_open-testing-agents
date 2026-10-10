@@ -65,6 +65,7 @@ resource "local_file" "agent_quadlet" {
     model_fast_name      = var.model_fast_name
     target_url           = var.target_url
     mcp_url              = var.mcp_url
+    run_interval         = var.run_interval
     credential_file      = local.credential_file
     odysseus_secrets_dir = local.odysseus_secrets_dir
   })

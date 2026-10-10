@@ -489,16 +489,60 @@ def fetch_knowledge(limit: int = 6) -> str:
     return text
 
 
+def _run_failed(report: str) -> bool:
+    """Heuristic: a broken crew/execution must not close the task as 'done'.
+
+    Matches the failure strings produced by run_crew()/run_playwright(). A
+    failed run is recorded on the bus as status 'failed' instead, so the
+    manager's monitoring and the final report stay honest.
+    """
+    text = report or ""
+    lowered = text.lower()
+    return (lowered.lstrip().startswith("crewai failed:")
+            or "playwright_test.py failed" in lowered
+            or "playwright_test.py timed out" in lowered
+            or "no playwright_test.py generated" in lowered)
+
+
 def share_findings(role: str, task, report: str) -> None:
-    """Submit this run's report as shared knowledge and close the task."""
+    """Submit this run's report as shared knowledge and close the task.
+
+    success=False records a broken run as task status 'failed' (the bus marks
+    it 'done' only when the run actually passed).
+    """
     if mcp_bus is None or not (report or "").strip():
         return
     task_id = task.get("id") if task else None
     try:
-        mcp_bus.submit_findings(role, task_id, report, kind="findings")
+        mcp_bus.submit_findings(role, task_id, report, kind="findings",
+                                success=not _run_failed(report))
         print(f"mcp: submitted findings for {role} (task {task_id})", flush=True)
     except Exception as e:  # noqa: BLE001
         print(f"mcp: submit_findings failed: {e}", file=sys.stderr)
+
+
+def manager_ensure_team_case(test_case: str, instruction: str) -> list[str]:
+    """The test manager commands the team: dispatch the assigned test case to
+    any worker that does not already have it open (pending/running).
+
+    This makes the manager agent the deterministic commander of the e2e
+    engineer and the pentester: a case assigned to the manager is guaranteed to
+    reach both workers over the bus (with the manager's extra direction), even
+    if the manager crew itself never calls the assign action. Returns the
+    roles that received a fresh task.
+    """
+    if mcp_bus is None or not (test_case or "").strip():
+        return []
+    dispatched = []
+    for role in ("e2e", "pentester"):
+        try:
+            if mcp_bus.has_open_task(role, test_case).strip().lower() == "no":
+                mcp_bus.assign_test_case(role, test_case,
+                                         instruction or "", start=False)
+                dispatched.append(role)
+        except Exception as e:  # noqa: BLE001
+            print(f"mcp: manager dispatch to {role} failed: {e}", file=sys.stderr)
+    return dispatched
 
 
 def publish_process() -> None:
@@ -607,6 +651,16 @@ def run_once() -> int:
                 print(f"mcp: manager monitoring inputs failed: {e}", file=sys.stderr)
         inputs_extra["agent_status"] = agent_status
         inputs_extra["task_list"] = task_list
+
+        # The manager is the team's commander: a case assigned to the manager
+        # is dispatched to the e2e engineer and the pentester over the bus, so
+        # it is guaranteed to reach them even if the crew does not call assign.
+        if task and test_case:
+            dispatched = manager_ensure_team_case(
+                test_case, (task or {}).get("instruction", ""))
+            if dispatched:
+                print(f"mcp: manager commanded {', '.join(dispatched)} with "
+                      f"'{test_case[:100]}'", flush=True)
 
     stop_ev = None
     watcher = None
