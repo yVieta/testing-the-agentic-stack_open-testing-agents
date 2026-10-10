@@ -269,6 +269,17 @@ class Bus:
         ids = []
         with self._db() as conn:
             for r in roles:
+                # Dedup: the manager crew loops on action=assign; do not stack
+                # a second open task for a role that already has the same test
+                # case pending or running (its next pull will pick it up).
+                open_row = conn.execute(
+                    "SELECT id FROM tasks "
+                    "WHERE role = ? AND test_case = ? "
+                    "AND status IN ('pending', 'running') LIMIT 1",
+                    (r, str(test_case).strip())).fetchone()
+                if open_row:
+                    ids.append((r, open_row["id"]))
+                    continue
                 cur = conn.execute(
                     "INSERT INTO tasks (role, test_case, instruction, status, created_at) "
                     "VALUES (?, ?, ?, 'pending', ?)",
@@ -832,6 +843,8 @@ def _dispatch(bus: Bus, name: str, args: dict) -> dict:
     fn = table.get(name)
     if fn is None:
         return _tool_result(f"unknown tool '{name}'", is_error=True)
+    if name in ("start_agent", "stop_agent", "assign_test_case"):
+        print(f"mcp-bus: dispatch {name} args={args}", flush=True)
     try:
         return _tool_result(fn())
     except Exception as exc:  # noqa: BLE001 - report tool failures as MCP errors

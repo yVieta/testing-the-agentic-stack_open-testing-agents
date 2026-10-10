@@ -1,7 +1,9 @@
 [Unit]
 Description=odysseus AI workspace (systemd-managed container)
-After=network-online.target odysseus-searxng.service odysseus-chromadb.service
-Wants=network-online.target
+After=odysseus-searxng.service odysseus-chromadb.service
+# No network-online.target: the podman user generator turns it into
+# podman-user-wait-network-online.service, which never completes here and
+# blocks every systemctl start/restart job until timeout.
 Requires=odysseus-searxng.service odysseus-chromadb.service
 
 [Container]

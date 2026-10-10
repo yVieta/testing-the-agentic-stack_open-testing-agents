@@ -1,7 +1,6 @@
 [Unit]
 Description=odysseus SearXNG metasearch (systemd-managed container)
-After=network-online.target
-Wants=network-online.target
+# No network-online.target (see odysseus-app.container.tftpl)
 
 [Container]
 Image=${searxng_image}

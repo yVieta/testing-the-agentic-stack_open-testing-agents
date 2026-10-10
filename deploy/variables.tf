@@ -49,13 +49,13 @@ variable "model_name" {
 
 variable "model_fast_url" {
   type        = string
-  description = "Fast secondary model endpoint (phi-mini-moe on 18081) used to condense shared findings."
-  default     = "http://127.0.0.1:18081"
+  description = "Fast secondary model endpoint (phi-mini-moe on 18081) used to condense shared findings. Empty = disabled (default)."
+  default     = ""
 }
 
 variable "model_fast_name" {
   type        = string
-  description = "Fast secondary model alias."
+  description = "Fast secondary model alias. Only used when model_fast_url is set."
   default     = "phi-mini-moe"
 }
 
@@ -115,10 +115,24 @@ variable "enable_on_boot" {
   default     = false
 }
 
-# --- report mail (Odysseus mail function) -------------------------------------
+variable "secondary_model_enabled" {
+  type        = bool
+  description = "Run the secondary fast model (Phi-mini-MoE) alongside the primary phi-4-mini. When false only the primary model is served and the worker's condense step is skipped."
+  default     = false
+}
+
+# --- report mail (MCP bus mail function) -------------------------------------
 
 variable "report_mail_to" {
   type        = string
-  description = "Default recipient(s) of the test reports (comma-separated ok). Written into the odysseus credentials.env as REPORT_MAIL_TO and the bus unit, so the manager's report lands in the Odysseus mail function for these recipients. Empty -> the sender must pass a recipient explicitly."
+  description = "Default recipient(s) of the test reports (comma-separated ok). Written into the MCP bus config as REPORT_MAIL_TO so the manager's report is mailed to these recipients. Empty -> the sender must pass a recipient explicitly."
   default     = ""
+}
+
+# --- SUT options --------------------------------------------------------------
+
+variable "grafana_enabled" {
+  type        = bool
+  description = "Enable Grafana dashboard in the SUT pod."
+  default     = false
 }

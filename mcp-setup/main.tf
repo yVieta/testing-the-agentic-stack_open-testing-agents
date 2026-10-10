@@ -4,7 +4,6 @@ locals {
   home                 = var.home_dir != "" ? var.home_dir : pathexpand("~")
   expanded_unit_dir    = var.unit_dir == "~/.config/systemd/user" ? format("%s/.config/systemd/user", local.home) : var.unit_dir
   repo_dir             = var.repo_dir != "" ? var.repo_dir : abspath("${path.module}/..")
-  odysseus_secrets_dir = var.odysseus_secrets_dir != "" ? var.odysseus_secrets_dir : "${var.spool_root}/odysseus/secrets"
   state_dir            = "${var.spool_root}/mcp"
   db_path              = "${local.state_dir}/mcp.db"
   seed_file            = "${local.state_dir}/seed-tasks.json"
@@ -48,8 +47,8 @@ resource "local_file" "mcp_unit" {
     # Written by mcp-setup/terraform - the aigents MCP knowledge/control bus.
     [Unit]
     Description=aigents MCP knowledge + control bus
-    After=network-online.target
-    Wants=network-online.target
+    # No network-online.target: in the user session it never completes and
+    # delays/start blocks every start job.
 
     [Service]
     Type=simple
@@ -59,9 +58,8 @@ resource "local_file" "mcp_unit" {
     Environment=TARGET_URL=${var.target_url}
     Environment=MCP_UNIT_PREFIX=${var.unit_prefix}
     Environment=REPORT_MAIL_TO=${var.report_mail_to}
-    Environment=ODYSSEUS_SECRETS=${local.odysseus_secrets_dir}/credentials.env
     Environment=SEED_JOBS=${local.seed_file}
-    ExecStart=${var.python_bin} ${local.server} --host ${var.mcp_host} --port ${var.mcp_port} --db ${local.db_path} --odysseus-secrets ${local.odysseus_secrets_dir}/credentials.env --unit-prefix ${var.unit_prefix} --seed-jobs ${local.seed_file}
+    ExecStart=${var.python_bin} ${local.server} --host ${var.mcp_host} --port ${var.mcp_port} --db ${local.db_path} --unit-prefix ${var.unit_prefix} --seed-jobs ${local.seed_file}
     Restart=on-failure
     RestartSec=5
 

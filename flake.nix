@@ -25,6 +25,7 @@
           just
           python3
           python3Packages.pip
+          python3Packages.psycopg
           dhall # .dhall/ sources
           dhall-json # dhall-to-json / json-to-dhall (used by `just`)
           jq

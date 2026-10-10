@@ -6,26 +6,26 @@
 # Every module owns its own state and a `service_state` variable, so this is a
 # thin ordered wrapper around `tofu apply`:
 #
-#   start: model-setup -> sut-setup -> mcp-setup -> agent-setup -> odysseus-setup
-#   stop : the exact reverse (odysseus-setup -> agent-setup -> mcp-setup -> sut-setup -> model-setup)
+#   start: model-setup -> sut-setup -> mcp-setup -> agent-setup -> 
+#   stop : the exact reverse ( -> agent-setup -> mcp-setup -> sut-setup -> model-setup)
 #
 # `--parallel` (or `-P`) rearranges `start` into dependency waves applied
 # concurrently, which is faster when several modules were changed at once:
 #
 #   wave 1: model-setup, sut-setup, mcp-setup   (independent)
-#   wave 2: agent-setup, odysseus-setup         (both need the model up)
+#   wave 2: agent-setup,          (both need the model up)
 #
 # A subset given with `--parallel` is grouped the same way; modules whose
 # dependencies fall outside the selection are treated as already satisfied.
 #
 # `tofu apply` only restarts a module whose triggers changed (rendered units and
 # content hashes of the worker scripts/bus server). So a plain `start` already
-# skips the model and SUT when only agent/bus/Odysseus code changed — a "code
+# skips the model and SUT when only agent/bus code changed — a "code
 # round-trip" restart of just those three is ~9 min (parallel: ~5 min) instead
 # of the ~22-25 min a full `restart` (stop + start) takes.
 #
 # Stopping keeps all state: podman images, GGUF weights, the Postgres data dir
-# and the Odysseus/agent volumes are untouched. `tofu destroy` is a separate,
+# and the agent volumes are untouched. `tofu destroy` is a separate,
 # destructive operation and is intentionally not wrapped here.
 #
 # `start` draws a live status bar (when stderr is a TTY) showing the elapsed
@@ -43,7 +43,7 @@
 #   ./start-services.sh status          # show tofu outputs for each module
 #   ./start-services.sh start model-setup agent-setup   # a subset, in order
 #   ./start-services.sh --parallel start                 # apply in waves, concurrently
-#   ./start-services.sh -P start mcp-setup agent-setup odysseus-setup
+#   ./start-services.sh -P start mcp-setup agent-setup 
 #
 # With --parallel, `start` runs the modules in dependency waves (see the header
 # comment) and reports each module's own duration; `stop` always stays in the
@@ -202,7 +202,6 @@ _eta_default() { # module -> default seed seconds
     sut-setup)      echo "${START_ETA_SUT:-30}" ;;
     mcp-setup)      echo "${START_ETA_MCP:-30}" ;;
     agent-setup)    echo "${START_ETA_AGENT:-180}" ;;
-    odysseus-setup) echo "${START_ETA_ODYSSEUS:-120}" ;;
     *)              echo "${START_ETA_DEFAULT:-60}" ;;
   esac
 }
@@ -213,7 +212,6 @@ _eta_override() { # module -> env override (or empty)
     sut-setup)      echo "${START_ETA_SUT:-}" ;;
     mcp-setup)      echo "${START_ETA_MCP:-}" ;;
     agent-setup)    echo "${START_ETA_AGENT:-}" ;;
-    odysseus-setup) echo "${START_ETA_ODYSSEUS:-}" ;;
     *)              echo "${START_ETA_DEFAULT:-}" ;;
   esac
 }
@@ -371,13 +369,13 @@ run_start() {
 # Parallel start: apply the selected modules in dependency waves, running the
 # modules of each wave concurrently. Wave 1 always holds the independent
 # modules (model-setup, sut-setup, mcp-setup); wave 2 holds agent-setup and
-# odysseus-setup, which both expect the model stack to be up. For subset runs,
+# , which both expect the model stack to be up. For subset runs,
 # a dependency outside the selection counts as already satisfied.
 # =============================================================================
 
 _module_deps() { # module -> space separated dependencies (or empty)
   case "$1" in
-    agent-setup|odysseus-setup) echo "model-setup" ;;
+    agent-setup) echo "model-setup" ;;
     *) echo "" ;;
   esac
 }

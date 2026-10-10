@@ -5,7 +5,8 @@ locals {
   expanded_quadlet_dir = var.quadlet_dir == "~/.config/containers/systemd" ? format("%s/.config/containers/systemd", local.home) : var.quadlet_dir
   repo_dir             = var.repo_dir != "" ? var.repo_dir : abspath("${path.module}/..")
   credential_file      = var.credential_file != "" ? var.credential_file : "${var.spool_root}/database/secrets/credentials.env"
-  odysseus_secrets_dir = var.odysseus_secrets_dir != "" ? var.odysseus_secrets_dir : "${var.spool_root}/odysseus/secrets"
+  # Results directory for test artifacts (Playwright screenshots, reports, etc.)
+  results_dir          = var.results_dir != "" ? var.results_dir : "${var.spool_root}/results"
 }
 
 # --- agent image ------------------------------------------------------------
@@ -34,17 +35,29 @@ resource "null_resource" "build_agent_image" {
 
 # --- host directories -------------------------------------------------------
 
-# The Odysseus credentials dir is written by odysseus-setup, which may not have
-# run yet on a fresh deploy (agent-setup starts first). Create it so the read-
-# only bind mount below always has a source; the worker simply skips publishing
-# until credentials.env appears.
-resource "null_resource" "odysseus_secrets_dir" {
+# --- host directories -------------------------------------------------------
+# The credentials dir is written by model-setup (llama.cpp + PostgreSQL).
+# It is mounted read-only into each agent so the worker can access model
+# configuration (e.g. API keys, report settings).
+# The file is created by model-setup; here we just ensure it exists.
+resource "null_resource" "ensure_credentials_env" {
   triggers = {
-    dir = local.odysseus_secrets_dir
+    file = local.credential_file
   }
 
   provisioner "local-exec" {
-    command = "mkdir -p \"${local.odysseus_secrets_dir}\""
+    command = "mkdir -p \"$(dirname ${local.credential_file})\" && [ -e ${local.credential_file} ] || : > ${local.credential_file}"
+  }
+}
+
+# Results directory for test artifacts (screenshots, reports, etc.)
+resource "null_resource" "ensure_results_dir" {
+  triggers = {
+    dir = local.results_dir
+  }
+
+  provisioner "local-exec" {
+    command = "mkdir -p \"${local.results_dir}/e2e\" \"${local.results_dir}/pentester\" \"${local.results_dir}/manager\""
   }
 }
 
@@ -67,7 +80,7 @@ resource "local_file" "agent_quadlet" {
     mcp_url              = var.mcp_url
     run_interval         = var.run_interval
     credential_file      = local.credential_file
-    odysseus_secrets_dir = local.odysseus_secrets_dir
+    results_dir          = local.results_dir
   })
 }
 
@@ -77,7 +90,6 @@ resource "null_resource" "start_agents" {
   depends_on = [
     local_file.agent_quadlet,
     null_resource.build_agent_image,
-    null_resource.odysseus_secrets_dir,
   ]
 
   triggers = {
@@ -99,6 +111,13 @@ resource "null_resource" "start_agents" {
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
       user=$(id -un)
       systemctl --user daemon-reload
+      # The podman user generator adds Wants=podman-user-wait-network-online
+      # to every container unit. That one-shot polls the system-level
+      # network-online.target, which never comes up on this host, so every
+      # `systemctl start/restart agent-*` queues behind it and times out.
+      # The whole stack is loopback, so mask it: Wants on a masked unit are
+      # satisfied as inactive and start jobs complete immediately.
+      systemctl --user mask podman-user-wait-network-online.service 2>/dev/null || true
       if [ "${var.service_state}" = "stopped" ]; then
         for role in ${join(" ", sort(keys(var.roles)))}; do
           systemctl --user disable --now "agent-$${role}.service" 2>/dev/null || true

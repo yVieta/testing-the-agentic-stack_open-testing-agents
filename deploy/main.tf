@@ -4,11 +4,11 @@
 # OpenTofu configuration, so the whole setup is brought up, converged and torn
 # down with a single `tofu apply` (see `justfile`: `just deploy` / `just down`).
 #
-#   module.model    llama.cpp + PostgreSQL   (independent)
-#   module.sut      Juice Shop + nginx       (independent)
-#   module.mcp      MCP knowledge/control bus (independent)
-#   module.agents   e2e / pentester / manager agents  (needs module.model)
-#   module.odysseus workspace + chrome/ntfy/searxng    (needs module.model)
+#   module.model     llama.cpp + PostgreSQL          (independent)
+#   module.sut       Juice Shop + nginx              (independent)
+#   module.mcp       MCP knowledge/control bus       (independent)
+#   module.agents    e2e / pentester / manager agents (needs module.model)
+#   module.odysseus  Workspace + chrome/ntfy/searxng  (needs module.model)
 #
 # Dependency waves fall out of OpenTofu's DAG: independent modules apply
 # concurrently (-parallelism), and agents/odysseus only apply after the model —
@@ -30,9 +30,10 @@ locals {
 module "model" {
   source = "../model-setup"
 
-  home_dir      = var.home_dir
-  spool_root    = var.spool_root
-  service_state = var.service_state
+  home_dir             = var.home_dir
+  spool_root           = var.spool_root
+  service_state        = var.service_state
+  secondary_model_enabled = var.secondary_model_enabled
 }
 
 # --- system under test: Juice Shop behind the nginx proxy --------------------
@@ -42,6 +43,7 @@ module "sut" {
 
   home_dir      = var.home_dir
   service_state = var.service_state
+  grafana_enabled = var.grafana_enabled
 }
 
 # --- MCP knowledge/control bus ------------------------------------------------

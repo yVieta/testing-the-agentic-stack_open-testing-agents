@@ -11,6 +11,7 @@ server {
     }
 }
 
+%{if grafana_enabled}
 server {
     listen 80;
     server_name grafana.sut;
@@ -24,3 +25,4 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+%{endif}

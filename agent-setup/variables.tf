@@ -36,8 +36,8 @@ variable "model_name" {
 
 variable "model_fast_url" {
   type        = string
-  description = "Base URL of the secondary fast model (phi-mini-moe). The worker uses it to condense shared findings before they enter the primary's context; empty/unreachable disables the condense step."
-  default     = "http://127.0.0.1:18081"
+  description = "Base URL of the secondary fast model (phi-mini-moe). The worker uses it to condense shared findings before they enter the primary's context; empty/unreachable disables the condense step. Empty by default: only phi-4-mini runs."
+  default     = ""
 }
 
 variable "model_fast_name" {
@@ -76,9 +76,9 @@ variable "credential_file" {
   default     = ""
 }
 
-variable "odysseus_secrets_dir" {
+variable "results_dir" {
   type        = string
-  description = "Directory holding Odysseus' credentials.env (written by odysseus-setup). Mounted read-only into each agent so the e2e worker can publish generated Playwright code to the Odysseus document library. Defaults to <spool_root>/odysseus/secrets."
+  description = "Base directory for test results and artifacts (screenshots, reports). Subdirectories per role (e2e/, pentester/, manager/) will be created. Defaults to <spool_root>/results."
   default     = ""
 }
 

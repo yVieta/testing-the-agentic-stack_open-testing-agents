@@ -85,8 +85,6 @@ restart:
 redeploy:
     ./start-services.sh start mcp-setup agent-setup odysseus-setup
 
-# Code round-trip, parallel: bus first, agents + Odysseus concurrently after.
-# ~5 min on this host.
 redeploy-fast:
     ./start-services.sh --parallel start mcp-setup agent-setup odysseus-setup
 

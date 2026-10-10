@@ -72,6 +72,12 @@ variable "grafana_admin_password" {
   default   = "admin"
 }
 
+variable "grafana_enabled" {
+  type        = bool
+  description = "Enable Grafana dashboard in the SUT pod."
+  default     = false
+}
+
 variable "enable_on_boot" {
   type        = bool
   description = "Link the SUT pod into the user's default.target so it starts automatically at boot/login. Default false: the pod is started now but not linked, so start it explicitly (systemctl --user start sut-pod.service, or ./start-services.sh)."

@@ -17,6 +17,7 @@ resource "local_file" "juice_shop_quadlet" {
 }
 
 resource "local_file" "grafana_quadlet" {
+  count = var.grafana_enabled ? 1 : 0
   filename = "${local.expanded_quadlet_dir}/grafana.container"
   content = templatefile(
     "${path.module}/quadlet/grafana.container.tftpl",
@@ -34,11 +35,12 @@ resource "local_file" "sut_pod_quadlet" {
   content = templatefile(
     "${path.module}/quadlet/sut.pod.tftpl",
     {
-      bind_address        = var.bind_address
-      nginx_http_port     = var.nginx_http_port
-      juice_shop_port     = var.juice_shop_port
-      grafana_port        = var.grafana_port
-      grafana_listen_port = var.grafana_listen_port
+      bind_address         = var.bind_address
+      nginx_http_port      = var.nginx_http_port
+      juice_shop_port      = var.juice_shop_port
+      grafana_port         = var.grafana_port
+      grafana_listen_port  = var.grafana_listen_port
+      grafana_enabled      = var.grafana_enabled
     }
   )
 }
@@ -60,6 +62,7 @@ resource "local_file" "nginx_default_conf" {
     "${path.module}/nginx/default.conf.tftpl",
     {
       grafana_listen_port = var.grafana_listen_port
+      grafana_enabled     = var.grafana_enabled
     }
   )
 }
@@ -67,7 +70,7 @@ resource "local_file" "nginx_default_conf" {
 resource "null_resource" "start_services" {
   depends_on = [
     local_file.juice_shop_quadlet,
-    local_file.grafana_quadlet,
+    local_file.grafana_quadlet[0],
     local_file.sut_pod_quadlet,
     local_file.nginx_proxy_quadlet,
     local_file.nginx_default_conf,
@@ -76,7 +79,7 @@ resource "null_resource" "start_services" {
   triggers = {
     pod           = local_file.sut_pod_quadlet.content
     juice         = local_file.juice_shop_quadlet.content
-    grafana       = local_file.grafana_quadlet.content
+    grafana       = var.grafana_enabled ? local_file.grafana_quadlet[0].content : ""
     nginx         = local_file.nginx_proxy_quadlet.content
     nginx_conf    = local_file.nginx_default_conf.content
     service_state = var.service_state

@@ -1,10 +1,11 @@
 [Unit]
-Description=Security SUT pod (nginx + Juice Shop + Grafana)
+Description=Security SUT pod (nginx + Juice Shop%{if grafana_enabled} + Grafana%{endif})
 
 [Pod]
 PublishPort=${bind_address}:${nginx_http_port}:80
 PublishPort=${bind_address}:${juice_shop_port}:3000
-PublishPort=${bind_address}:${grafana_port}:${grafana_listen_port}
+%{if grafana_enabled}PublishPort=${bind_address}:${grafana_port}:${grafana_listen_port}
+%{endif}
 
 [Install]
 WantedBy=default.target

@@ -8,10 +8,8 @@ the other agents through the MCP knowledge/control bus (worker/mcp_server.py):
   * assign a test case to the e2e tester and/or pentester      (/case)
   * start/stop the agent services and read their state         (/start /stop /agents)
   * read the shared findings and task queue                    (/findings /tasks)
-  * show / publish the live testing-process document           (/process /publish)
-  * request the latest results from the Odysseus Notes panel   (/notes)
-  * push a test-results note into the Odysseus web UI          (/note)
-  * mail the latest report through the Odysseus mail function  (/mail)
+  * show the live testing-process document                     (/process)
+  * **real-time dashboard** showing e2e/pentester progress      (/watch)
 
 Live bus state is injected into the model context on every turn, so ordinary
 questions like "how far along is the security test?" are answered with the real
@@ -22,6 +20,7 @@ Usage:
   ./worker/tm_cli.py --once "how are the last test results"
   ./worker/tm_cli.py --once "/case both test the login for sqli and xss"
   ./worker/tm_cli.py --model-url http://127.0.0.1:18080/v1
+  ./worker/tm_cli.py --watch               # real-time status dashboard
 
 Slash commands:
   /help              show this help
@@ -33,10 +32,7 @@ Slash commands:
   /tasks [role]      list assigned test-case tasks
   /findings [role]   read the findings the agents shared
   /process           show the live testing-process markdown
-  /publish           publish the process document to Odysseus
-  /notes [label]     request the note(s) on the Odysseus Notes panel (test results)
-  /note <title> <..> publish a note to the Odysseus web UI (label test-results)
-  /mail [to]         mail the latest test report via the Odysseus mail function
+  /watch             real-time testing status dashboard (Ctrl+C to exit)
   /save              persist the current transcript to postgres (collection tm_cli)
   /latest            print the most recent stored report (from the agents or this CLI)
   /clear             reset the conversation (the test-manager persona stays)
@@ -58,7 +54,10 @@ import argparse
 import json
 import os
 import sys
+import time
+import threading
 from pathlib import Path
+from datetime import datetime
 
 REPO = Path(__file__).resolve().parent.parent
 AGENT_JSON = REPO / "build" / "agents" / "test_manager_agent.json"
@@ -84,15 +83,14 @@ FALLBACK_PERSONA = {
         "read the findings they share, monitor their state and dispatched tasks "
         "and dispatch follow-ups when coverage is missing, verify coverage and "
         "quality, and produce a final consolidated report of end-to-end and "
-        "security results, published to Odysseus and mailed to the report "
-        "recipients through the Odysseus mail function"
+        "security results"
     ),
     "backstory": (
         "an experienced test manager with a track record of running end-to-end "
         "and security testing programs across large web applications; you "
         "control the other agents through the MCP knowledge bus, monitor their "
         "state and dispatched test cases, and shape the final markdown report "
-        "that is published to Odysseus and mailed to the report recipients"
+        "that is published to the report recipients"
     ),
     "tools": ["FileReadTool", "FileWriterTool", "custom:aigents_bus"],
 }
@@ -104,6 +102,7 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 DIM = "\033[2m"
 RESET = "\033[0m"
+CLEAR = "\033[2J\033[H"  # clear screen + home cursor
 
 
 def load_persona(path: Path) -> dict:
@@ -132,8 +131,7 @@ def system_prompt(persona: dict, model_name: str) -> str:
         "monitor their state and dispatched tasks, and dispatch follow-ups when "
         "coverage is missing. Answer as the test manager: coordinate, review and "
         "report on testing activities. Produce markdown reports when the user "
-        "asks for a report, send them as mail through the Odysseus mail function "
-        "when asked, and keep answers actionable."
+        "asks for a report, and keep answers actionable."
     )
 
 
@@ -311,9 +309,7 @@ HELP = f"""{BOLD}commands{CYAN}
 {CYAN}  /tasks     {RESET}[role]  list assigned test-case tasks
 {CYAN}  /findings  {RESET}[role]  read the findings the agents shared
 {CYAN}  /process   {RESET}show the live testing-process markdown
-{CYAN}  /publish   {RESET}publish the process document to Odysseus
-{CYAN}  /notes     {RESET}[label]  request the note(s) on the Odysseus Notes panel (latest results)
-{CYAN}  /note      {RESET}<title> <text>  publish a note to the Odysseus web UI (label test-results)
+{CYAN}  /watch     {RESET}real-time testing status dashboard (Ctrl+C to exit)
 {CYAN}  /save      {RESET}persist the current transcript to postgres (collection tm_cli)
 {CYAN}  /latest    {RESET}print the most recent stored document (latest agent report or session)
 {CYAN}  /clear     {RESET}reset the conversation (test-manager persona stays)
@@ -347,9 +343,183 @@ def print_assistant(text: str) -> None:
     print(f"{GREEN}tm ▸{RESET} {text}")
 
 
+# =============================================================================
+# Real-time Status Dashboard
+# =============================================================================
+
+class StatusDashboard:
+    """Real-time terminal dashboard showing e2e and pentester progress."""
+
+    def __init__(self, mcp_url: str = MCP_URL, interval: float = 3.0):
+        self.mcp_url = mcp_url
+        self.interval = interval
+        self.running = False
+        self._lock = threading.Lock()
+        self._last_data = {
+            "tasks": "",
+            "status": "",
+            "findings": "",
+            "timestamp": ""
+        }
+
+    def _fetch_all(self) -> dict:
+        """Fetch all status data from the MCP bus."""
+        if mcp_bus is None:
+            return {"error": "MCP bus client unavailable"}
+        try:
+            tasks = mcp_bus.list_tasks(limit=50, url=self.mcp_url)
+            status = mcp_bus.get_agent_status("", url=self.mcp_url)
+            findings = mcp_bus.get_findings(limit=5, url=self.mcp_url)
+            return {
+                "tasks": tasks,
+                "status": status,
+                "findings": findings,
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "error": None
+            }
+        except Exception as exc:
+            return {"error": f"{exc}", "timestamp": datetime.now().strftime("%H:%M:%S")}
+
+    def _format_task(self, task_text: str) -> list[str]:
+        """Parse and format task list for display."""
+        lines = task_text.strip().split("\n")
+        formatted = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Color code by status
+            if "running" in line.lower():
+                formatted.append(f"{YELLOW}{line}{RESET}")
+            elif "done" in line.lower() or "completed" in line.lower():
+                formatted.append(f"{GREEN}{line}{RESET}")
+            elif "failed" in line.lower() or "error" in line.lower():
+                formatted.append(f"{RED}{line}{RESET}")
+            elif "pending" in line.lower():
+                formatted.append(f"{DIM}{line}{RESET}")
+            else:
+                formatted.append(line)
+        return formatted
+
+    def _format_agent_status(self, status_text: str) -> list[str]:
+        """Format agent status for display."""
+        lines = status_text.strip().split("\n")
+        formatted = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if "active" in line.lower() or "running" in line.lower():
+                formatted.append(f"{GREEN}{line}{RESET}")
+            elif "inactive" in line.lower() or "stopped" in line.lower():
+                formatted.append(f"{RED}{line}{RESET}")
+            else:
+                formatted.append(line)
+        return formatted
+
+    def _format_findings(self, findings_text: str) -> list[str]:
+        """Format findings for display (truncated)."""
+        lines = findings_text.strip().split("\n")
+        formatted = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if len(line) > 100:
+                line = line[:97] + "..."
+            formatted.append(f"{CYAN}▸{RESET} {line}")
+        return formatted[:8]  # max 8 findings
+
+    def render(self, data: dict) -> str:
+        """Render the dashboard as a string."""
+        out = []
+        out.append(f"{BOLD}{CYAN}╔════════════════════════════════════════════════════════════════════╗{RESET}")
+        out.append(f"{BOLD}{CYAN}║{RESET}  {BOLD}open-testing-agents  |  REAL-TIME STATUS DASHBOARD{RESET}  {BOLD}{CYAN}║{RESET}")
+        out.append(f"{BOLD}{CYAN}╠═════════════════════════════════════════════════════════════════════╣{RESET}")
+        out.append(f"{BOLD}{CYAN}║{RESET}  {DIM}Last update: {data.get('timestamp', '—')}{RESET}  "
+                 f"{DIM}MCP: {self.mcp_url}{RESET}")
+        out.append(f"{BOLD}{CYAN}╠═════════════════════════════════════════════════════════════════════╣{RESET}")
+
+        # Agent Status
+        out.append(f"{BOLD}{CYAN}║{RESET}  {BOLD}AGENT SERVICES (systemd){RESET}")
+        if "error" in data and data["error"]:
+            out.append(f"    {RED}Error: {data['error']}{RESET}")
+        else:
+            status_lines = self._format_agent_status(data.get("status", ""))
+            if status_lines:
+                for line in status_lines:
+                    out.append(f"    {line}")
+            else:
+                out.append(f"    {DIM}No agent status available{RESET}")
+
+        out.append(f"{BOLD}{CYAN}╠════════════════════════════════════════════════════════════════════╣{RESET}")
+
+        # Test Tasks
+        out.append(f"{BOLD}{CYAN}║{RESET}  {BOLD}TEST TASKS{RESET}")
+        tasks = data.get("tasks", "")
+        if "No tasks" in tasks or not tasks.strip():
+            out.append(f"    {DIM}No tasks assigned yet. Use /case to dispatch.{RESET}")
+        else:
+            task_lines = self._format_task(tasks)
+            for line in task_lines:
+                out.append(f"    {line}")
+
+        out.append(f"{BOLD}{CYAN}╠════════════════════════════════════════════════════════════════════╣{RESET}")
+
+        # Recent Findings
+        out.append(f"{BOLD}{CYAN}║{RESET}  {BOLD}RECENT FINDINGS (shared on bus){RESET}")
+        findings = data.get("findings", "")
+        if "No findings" in findings or not findings.strip():
+            out.append(f"    {DIM}No findings shared yet{RESET}")
+        else:
+            finding_lines = self._format_findings(findings)
+            for line in finding_lines:
+                out.append(f"    {line}")
+
+        out.append(f"{BOLD}{CYAN}╚═════════════════════════════════════════════════════════════════════╝{RESET}")
+        out.append(f"{DIM}Press Ctrl+C to return to CLI{RESET}")
+
+        return "\n".join(out)
+
+    def _update_loop(self):
+        """Background thread that polls the bus."""
+        while self.running:
+            data = self._fetch_all()
+            with self._lock:
+                self._last_data = data
+            time.sleep(self.interval)
+
+    def run(self):
+        """Run the dashboard (blocking, Ctrl+C to exit)."""
+        self.running = True
+        # Initial fetch
+        data = self._fetch_all()
+        with self._lock:
+            self._last_data = data
+
+        # Start background updater
+        updater = threading.Thread(target=self._update_loop, daemon=True)
+        updater.start()
+
+        try:
+            while self.running:
+                with self._lock:
+                    data = self._last_data.copy()
+                print(CLEAR, end="")
+                print(self.render(data))
+                time.sleep(self.interval)
+        except KeyboardInterrupt:
+            self.running = False
+            print(f"\n{DIM}Dashboard stopped{RESET}")
+        finally:
+            updater.join(timeout=1)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Test manager agent CLI / controller")
+    parser = argparse.ArgumentParser(description="Test manager agent CLI / controller / dashboard")
     parser.add_argument("--once", help="ask a single question (or run one /command) and exit")
+    parser.add_argument("--watch", action="store_true", help="run real-time status dashboard")
+    parser.add_argument("--interval", type=float, default=3.0, help="dashboard refresh interval (seconds)")
     parser.add_argument("--model-url", default=os.environ.get(
         "MODEL_URL", "http://127.0.0.1:18080/v1"), help="OpenAI-compatible API base")
     parser.add_argument("--model-name", default=os.environ.get("MODEL_NAME", "phi-4-mini"))
@@ -367,9 +537,13 @@ def main() -> int:
 
     messages = [{"role": "system", "content": system_prompt(persona, args.model_name)}]
 
+    # Dashboard mode
+    if args.watch:
+        dashboard = StatusDashboard(args.mcp_url, args.interval)
+        dashboard.run()
+        return 0
+
     def ask(question: str, save: bool = False) -> None:
-        # Refresh the live bus state in the model context so progress questions
-        # ("what is the pentester doing?") are answered from real task/agent data.
         ctx = bus_context()
         if ctx:
             if len(messages) > 1 and messages[1].get("role") == "system":
@@ -392,7 +566,6 @@ def main() -> int:
             print(f"\n{DIM}stopped{RESET}")
 
     def bus_call(name: str, **kwargs) -> None:
-        """Call an mcp_bus wrapper and print its text result (never raises)."""
         if mcp_bus is None:
             print(f"{YELLOW}MCP bus client unavailable (worker/mcp_bus.py not found){RESET}")
             return
@@ -402,7 +575,6 @@ def main() -> int:
             print(f"{RED}bus error: {exc}{RESET}")
 
     def run_command(line: str) -> bool:
-        """Handle a /command; return True when the line was one."""
         nonlocal messages
         cmd, _, rest = line.partition(" ")
         rest = rest.strip()
@@ -431,43 +603,10 @@ def main() -> int:
             bus_call("get_findings", role=rest, limit=10)
         elif cmd == "/process":
             bus_call("get_process")
-        elif cmd == "/publish":
-            bus_call("publish_process")
-        elif cmd == "/notes":
-            bus_call("list_notes", label=rest, limit=50)
-        elif cmd == "/note":
-            title, _, body = rest.partition(" ")
-            if not title or not body.strip():
-                print(f"{YELLOW}usage: /note <title> <text> — publishes a note to Odysseus{RESET}")
-            else:
-                bus_call("publish_note", title=title, content=body.strip(),
-                         label="test-results")
-        elif cmd == "/mail":
-            # Mail the latest test report via the Odysseus mail function.
-            # `to` defaults to REPORT_MAIL_TO (env or odysseus creds). Prefer the
-            # full testing-process markdown (the Notes list truncates content);
-            # fall back to the manager's test-results note.
-            to = rest.strip()
-            subject = f"Test report: {os.environ.get('TARGET_URL', 'aigents SUT')}"
-            body = ""
-            if mcp_bus is not None:
-                try:
-                    body = mcp_bus.get_process()
-                except Exception as exc:  # noqa: BLE001
-                    print(f"{RED}bus error while reading the process: {exc}{RESET}")
-            if not body.strip() and mcp_bus is not None:
-                try:
-                    notes = mcp_bus.list_notes(label="test-results", limit=100)
-                    for block in notes.split("\n\n### "):
-                        if block.strip().startswith("Test results: manager"):
-                            body = block.split("\n\n", 1)[1].strip() if "\n\n" in block else ""
-                            break
-                except Exception as exc:  # noqa: BLE001
-                    print(f"{RED}bus error while reading notes: {exc}{RESET}")
-            if not body.strip():
-                print(f"{YELLOW}no report to mail yet — run /case and let the agents finish first{RESET}")
-            else:
-                bus_call("mail_report", to=to, subject=subject, body=body)
+        elif cmd == "/watch":
+            print(f"{CYAN}Starting real-time dashboard... (Ctrl+C to exit){RESET}")
+            dashboard = StatusDashboard(args.mcp_url, args.interval)
+            dashboard.run()
         elif cmd == "/save":
             if not store.available():
                 print(f"{YELLOW}postgres not available; transcript not stored{RESET}")

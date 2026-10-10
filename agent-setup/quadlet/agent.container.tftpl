@@ -1,7 +1,10 @@
 [Unit]
 Description=aigents testing agent ${agent_role} (crew ${role_dir})
-After=network-online.target
-Wants=network-online.target
+# No After/Wants=network-online.target: the podman user generator turns that
+# into a hard dependency on podman-user-wait-network-online.service, which
+# hangs in this environment (user-level network-online.target never completes)
+# and makes every `systemctl start/restart` of the agent block until timeout.
+# The stack is all localhost (model, bus, SUT), so no online wait is needed.
 
 [Container]
 Image=${image}
@@ -9,7 +12,7 @@ Pull=never
 Network=host
 Volume=${repo_dir}:/repo:ro,Z
 Volume=${credential_file}:/run/secrets/credentials.env:ro,Z
-Volume=${odysseus_secrets_dir}:/run/secrets/odysseus:ro,Z
+Volume=${results_dir}/${role_dir}:/results:rw,Z
 Environment=CREW_ROLE=${agent_role}
 Environment=CREW_DIR=/repo/build/${role_dir}
 Environment=MODEL_URL=${model_url}
@@ -19,15 +22,12 @@ Environment=MODEL_FAST_NAME=${model_fast_name}
 Environment=TARGET_URL=${target_url}
 Environment=MCP_URL=${mcp_url}
 Environment=RUN_INTERVAL=${run_interval}
+Environment=RESULTS_DIR=/results
 Exec=python3 /repo/worker/run_agent.py
 
 [Service]
-Restart=always
-RestartSec=15
-# Self-healing bind sources: podman refuses to start when a bind mount source
-# is missing. Recreate the odysseus secrets dir and the credentials file on
-# every start, so a wiped path (or a manual cleanup) cannot wedge the agent.
-ExecStartPre=/bin/sh -c 'mkdir -p "$(dirname "${credential_file}")" "${odysseus_secrets_dir}" && chmod 0700 "${odysseus_secrets_dir}" && [ -e "${credential_file}" ] || : > "${credential_file}"'
+# Give the crew enough time to complete and save results (crew can take 2+ hours)
+TimeoutStopSec=14400
 
 [Install]
 WantedBy=default.target

@@ -54,7 +54,7 @@ variable "target_url" {
 
 variable "report_mail_to" {
   type        = string
-  description = "Default recipient of the test reports mailed through the Odysseus mail function (mail_report). Empty -> fall back to REPORT_MAIL_TO in the odysseus credentials.env."
+  description = "Default recipient(s) of the test reports (comma-separated ok). Written into the MCP bus config as REPORT_MAIL_TO so the manager's report is mailed to these recipients. Empty -> the sender must pass a recipient explicitly."
   default     = ""
 }
 
@@ -62,12 +62,6 @@ variable "unit_prefix" {
   type        = string
   description = "Prefix of the agent systemd user units the bus starts/stops (agent-<role>.service)."
   default     = "agent-"
-}
-
-variable "odysseus_secrets_dir" {
-  type        = string
-  description = "Directory holding Odysseus' credentials.env, used to publish the testing-process document. Defaults to <spool_root>/odysseus/secrets."
-  default     = ""
 }
 
 variable "python_bin" {

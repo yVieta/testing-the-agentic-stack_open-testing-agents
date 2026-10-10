@@ -131,7 +131,7 @@ variable "model_kv_cache_type" {
 variable "secondary_model_enabled" {
   type        = bool
   description = "Run the secondary fast model (Phi-mini-MoE) alongside the primary. When false only the primary model is served and the worker's condense step is skipped."
-  default     = true
+  default     = false
 }
 
 variable "secondary_model_repo" {

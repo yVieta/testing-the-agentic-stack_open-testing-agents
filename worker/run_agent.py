@@ -13,8 +13,6 @@ Runs inside the agent quadlet container (agent-setup/), with the repo mounted
 read-only at /repo and the model/postgres/MCP bus reachable on 127.0.0.1.
 """
 
-import hashlib
-import http.cookiejar
 import json
 import os
 import re
@@ -22,7 +20,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -31,6 +28,7 @@ REPO = Path(os.environ.get("REPO_DIR", "/repo"))
 ROLE = os.environ.get("CREW_ROLE", "e2e_test_agent")
 CREW_DIR = Path(os.environ.get("CREW_DIR", REPO / "build" / ROLE))
 WORK = Path(os.environ.get("WORK_DIR", "/tmp/crew"))  # writable scratch (repo is ro)
+RESULTS = Path(os.environ.get("RESULTS_DIR", "/results"))  # persistent results (screenshots, reports)
 
 MODEL_URL = os.environ.get("MODEL_URL", "http://127.0.0.1:18080/v1").rstrip("/")
 if not MODEL_URL.endswith("/v1"):
@@ -47,10 +45,6 @@ TARGET_URL = os.environ.get("TARGET_URL", "")
 DSN = os.environ.get("POSTGRES_DSN", "")
 HARNESS = Path(os.environ.get("HARNESS_DIR", "/opt/harness"))  # lean project, baked in image
 SECRETS = Path("/run/secrets/credentials.env")
-# credentials.env written by odysseus-setup; mounted read-only (may be absent
-# until that module has applied on a fresh deploy).
-ODYSSEUS_SECRETS = Path(os.environ.get("ODYSSEUS_SECRETS",
-                                       "/run/secrets/odysseus/credentials.env"))
 
 # --- MCP bus client (worker/mcp_bus.py sits next to this file) ----------------
 # The bus is where the roles exchange findings and the manager dispatches test
@@ -223,7 +217,7 @@ def run_crew(inputs_extra: dict | None = None) -> str:
     inputs = {"target_url": TARGET_URL, "role": ROLE}
     inputs.update(inputs_extra or {})
     r = subprocess.run(["crewai", "run", "--inputs", json.dumps(inputs)],
-                       cwd=WORK, env=env, capture_output=True, text=True, timeout=5400)
+                       cwd=WORK, env=env, capture_output=True, text=True, timeout=10800)
     if r.returncode != 0:
         return f"crewai failed: {r.stderr.strip()[:400]}"
     return r.stdout.strip() or "crew ran, empty output"
@@ -235,12 +229,25 @@ def run_playwright(timeout: int = 1800) -> str:
     The crew agents only carry crewAI's file tools (the framework ships no local
     code-execution tool), so the runner is what actually drives the browser.
     Best-effort: a missing or failing test must not abort the loop.
+    Screenshots and videos are saved to RESULTS_DIR.
     """
     script = WORK / "playwright_test.py"
     if not script.is_file():
         return "no playwright_test.py generated"
+    
+    # Ensure results directory exists
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    screenshots_dir = RESULTS / "screenshots"
+    videos_dir = RESULTS / "videos"
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    
     env = os.environ.copy()
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/opt/ms-playwright")
+    # Configure Playwright to save artifacts to results directory
+    env.setdefault("PLAYWRIGHT_SCREENSHOT_DIR", str(screenshots_dir))
+    env.setdefault("PLAYWRIGHT_VIDEO_DIR", str(videos_dir))
+    env.setdefault("PLAYWRIGHT_TRACE_DIR", str(RESULTS / "traces"))
     try:
         r = subprocess.run(["python3", str(script)], cwd=WORK, env=env,
                            capture_output=True, text=True, timeout=timeout)
@@ -248,7 +255,43 @@ def run_playwright(timeout: int = 1800) -> str:
         return f"playwright_test.py timed out after {timeout}s"
     status = "passed" if r.returncode == 0 else f"failed (exit {r.returncode})"
     tail = (r.stdout + "\n" + r.stderr).strip()
+    
+    # Copy any generated artifacts from WORK to RESULTS
+    _copy_playwright_artifacts(screenshots_dir, videos_dir)
+    
     return f"playwright_test.py {status}\n{tail[-1500:]}"
+
+
+def _copy_playwright_artifacts(screenshots_dir: Path, videos_dir: Path) -> None:
+    """Copy Playwright-generated artifacts from WORK to RESULTS directory."""
+    try:
+        # Look for screenshots in WORK (common locations)
+        for pattern in ["*.png", "*.jpg", "*.jpeg"]:
+            for src in WORK.rglob(pattern):
+                if "screenshot" in src.name.lower() or "playwright" in str(src).lower():
+                    dst = screenshots_dir / f"{src.stem}_{int(time.time())}{src.suffix}"
+                    try:
+                        shutil.copy2(src, dst)
+                    except Exception:
+                        pass
+        # Look for videos in WORK
+        for pattern in ["*.webm", "*.mp4"]:
+            for src in WORK.rglob(pattern):
+                dst = videos_dir / f"{src.stem}_{int(time.time())}{src.suffix}"
+                try:
+                    shutil.copy2(src, dst)
+                except Exception:
+                    pass
+        # Look for traces
+        traces_dir = RESULTS / "traces"
+        for src in WORK.rglob("trace.zip"):
+            dst = traces_dir / f"trace_{int(time.time())}.zip"
+            try:
+                shutil.copy2(src, dst)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"warning: failed to copy playwright artifacts: {e}", file=sys.stderr)
 
 
 def condense(text: str, max_chars: int = 4000) -> str:
@@ -378,83 +421,6 @@ def playwright_files() -> list:
     return found
 
 
-def publish_files(paths) -> None:
-    """Publish the given generated files to the Odysseus document library.
-
-    Documents are keyed by title, so re-publishing updates the same entry
-    instead of piling up new versions. Raises on any failure so callers decide
-    whether to swallow it.
-    """
-    creds = _read_env_file(ODYSSEUS_SECRETS)
-    password = creds.get("ODYSSEUS_ADMIN_PASSWORD", "")
-    if not password:
-        raise RuntimeError("odysseus creds unavailable")
-    base = creds.get("ODYSSEUS_URL", "http://127.0.0.1:7000").rstrip("/")
-    user = creds.get("ODYSSEUS_ADMIN_USER", "admin")
-    opener = urllib.request.build_opener(
-        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-    _ody_request(opener, base, "POST", "/api/auth/login",
-                 {"username": user, "password": password, "remember": True})
-    library = _ody_request(opener, base, "GET",
-                           "/api/documents/library?limit=50")
-    existing = {d.get("title"): d.get("id")
-                for d in library.get("documents", [])}
-    for path in paths:
-        content = path.read_text(errors="ignore")
-        title = f"Playwright: {path.name}"
-        language = _ODY_LANGUAGE.get(path.suffix, "text")
-        if existing.get(title):
-            _ody_request(opener, base, "PUT",
-                         f"/api/document/{existing[title]}",
-                         {"content": content})
-            print(f"odysseus: updated document {title}", flush=True)
-        else:
-            doc = _ody_request(opener, base, "POST", "/api/document",
-                               {"title": title, "language": language,
-                                "content": content})
-            existing[title] = doc.get("id")
-            print(f"odysseus: published document {title}", flush=True)
-
-
-def publish_to_odysseus() -> None:
-    """Publish the current generated Playwright code (best effort)."""
-    if harness_role() != "e2e":
-        return
-    files = playwright_files()
-    if not files:
-        print("no generated playwright code to publish", file=sys.stderr)
-        return
-    try:
-        publish_files(files)
-    except Exception as e:  # noqa: BLE001 - publishing must not break testing
-        print(f"odysseus publish failed: {e}", file=sys.stderr)
-
-
-def watch_playwright(stop_event) -> None:
-    """Publish generated code as it changes *while the crew is still running*.
-
-    crewai is synchronous and a full run can take many minutes, so without this
-    the generated test would only surface in Odysseus after the whole crew
-    finished. Republishing only when the file content changes avoids version
-    churn.
-    """
-    seen = {}
-    while not stop_event.is_set():
-        for p in playwright_files():
-            try:
-                digest = hashlib.sha256(p.read_bytes()).hexdigest()
-            except OSError:
-                continue
-            if seen.get(p) == digest:
-                continue
-            seen[p] = digest
-            try:
-                publish_files([p])
-            except Exception as e:  # noqa: BLE001
-                print(f"odysseus publish failed: {e}", file=sys.stderr)
-        stop_event.wait(10)
-
-
 # --- MCP bus: task fetch, knowledge exchange, progress -----------------------
 
 def fetch_task(role: str):
@@ -556,52 +522,34 @@ def publish_process() -> None:
         print(f"mcp: publish_process failed: {e}", file=sys.stderr)
 
 
-def publish_results_note(report: str) -> None:
-    """Publish this run's test results as a note in the Odysseus web UI.
-
-    The web Notes panel is where the results are visible to the user; unlike
-    the Playwright code documents, this is the human-facing report per role.
-    The stable title (per harness role) means the note is refreshed in place
-    instead of stacking duplicates. Best-effort: never breaks the run.
-    """
-    if mcp_bus is None or not (report or "").strip():
-        return
-    role = harness_role()
-    title = f"Test results: {role}"
+def _save_results_to_disk(role: str, task: dict | None, report: str) -> None:
+    """Save test report and artifacts to the persistent results directory."""
     try:
-        mcp_bus.publish_note(title, report, label="test-results")
-        print(f"mcp: published results note {title!r} to Odysseus", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"mcp: publish_results_note failed: {e}", file=sys.stderr)
-
-
-def mail_final_report(report: str, workdir: Path | None = None) -> None:
-    """Send the final report as mail through the Odysseus mail function.
-
-    The manager delivers report.md (written by the manager crew) when present,
-    else the crew's markdown output. Best-effort like every other publish step:
-    an unreachable bus/app or a missing SMTP account only prints a warning.
-    """
-    if mcp_bus is None or not (report or "").strip():
-        return
-    body = report
-    if workdir is not None:
-        for candidate in ("report.md", "report.txt"):
-            p = workdir / candidate
+        RESULTS.mkdir(parents=True, exist_ok=True)
+        timestamp = int(time.time())
+        task_id = task.get("id") if task else "none"
+        
+        # Save main report
+        report_file = RESULTS / f"report_{role}_task{task_id}_{timestamp}.md"
+        report_file.write_text(report)
+        
+        # Save task info
+        if task:
+            task_file = RESULTS / f"task_{role}_task{task_id}_{timestamp}.json"
+            task_file.write_text(json.dumps(task, indent=2))
+        
+        # Copy Playwright test script if exists
+        playwright_script = WORK / "playwright_test.py"
+        if playwright_script.is_file():
+            dst = RESULTS / f"playwright_test_{role}_task{task_id}_{timestamp}.py"
             try:
-                text = p.read_text(errors="ignore")
-            except OSError:
-                continue
-            if text.strip():
-                body = text
-                break
-    try:
-        out = mcp_bus.mail_report(to="",
-                                  subject=f"Test report: {TARGET_URL or 'aigents SUT'}",
-                                  body=body)
-        print(f"mcp: mail: {out}", flush=True)
-    except Exception as e:  # noqa: BLE001
-        print(f"mcp: mail_report failed: {e}", file=sys.stderr)
+                shutil.copy2(playwright_script, dst)
+            except Exception:
+                pass
+        
+        print(f"results: saved to {RESULTS}", flush=True)
+    except Exception as e:
+        print(f"warning: failed to save results to disk: {e}", file=sys.stderr)
 
 
 def run_once() -> int:
@@ -662,33 +610,19 @@ def run_once() -> int:
                 print(f"mcp: manager commanded {', '.join(dispatched)} with "
                       f"'{test_case[:100]}'", flush=True)
 
-    stop_ev = None
-    watcher = None
-    if role == "e2e":
-        stop_ev = threading.Event()
-        watcher = threading.Thread(target=watch_playwright, args=(stop_ev,),
-                                   daemon=True)
-        watcher.start()
     report = run_crew(inputs_extra)
-    if watcher is not None:
-        stop_ev.set()
-        watcher.join(timeout=15)
     print(report[-2000:], flush=True)
     if role == "e2e":
         result = run_playwright()
         print(result, flush=True)
         report = f"{report}\n\n--- playwright_test.py run ---\n{result}"
     store(ROLE, report, {"target": TARGET_URL, "tuning": tuning, "verdict": verdict})
+    # Save report and artifacts to persistent results directory
+    _save_results_to_disk(role, task, report)
     # Exchange knowledge: publish this run to the bus (closes the task).
     share_findings(role, task, report)
-    # Send the test results to the Odysseus web UI as a note (user-facing copy).
-    publish_results_note(report)
-    if role == "e2e":
-        publish_to_odysseus()
     if role == "manager":
         publish_process()
-        # Mail the final report through the Odysseus mail function (best effort).
-        mail_final_report(report, WORK)
     return 0
 
 

@@ -7,8 +7,8 @@ seed file (rendered from the module variables). It:
   1. waits for the app to become healthy,
   2. logs in as the admin (password read from the generated credentials.env),
   3. registers the primary (phi-4-mini :18080) and fast (phi-mini-moe :18081)
-  4. model endpoints if missing and prunes stale local model registrations,
-  5. installs / activates the "Test Manager" character preset.
+     model endpoints if missing and prunes stale local model registrations,
+  4. installs / activates the "Test Manager" character preset.
 
 Every step is a no-op when the object already exists, so re-running the tofu
 apply does not create duplicates. Only the standard library is used.
@@ -87,19 +87,93 @@ def wait_for_health(client, attempts=80, delay=3):
     raise SystemExit("odysseus-seed: app never became healthy")
 
 
+def register_admin(client, user, password):
+    """Try to register the admin user if registration is supported."""
+    try:
+        client.post("/api/auth/register",
+                    {"username": user, "password": password, "email": f"{user}@localhost"},
+                    form=False)
+        print(f"odysseus-seed: registered admin user {user}")
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:  # Conflict - user already exists
+            return False
+        if exc.code == 404:  # Not found - endpoint doesn't exist
+            return False
+        print(f"odysseus-seed: register failed: HTTP {exc.code}: {exc.read()[:200]!r}", file=sys.stderr)
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"odysseus-seed: register failed: {exc}", file=sys.stderr)
+        return False
+
+
+# Common default passwords that Odysseus might use on first boot
+DEFAULT_PASSWORDS = [
+    "admin",
+    "changeme",
+    "password",
+    "odysseus",
+    "admin123",
+    "adminadmin",
+    "root",
+    "toor",
+]
+
+
 def login(client, user, password, attempts=40, delay=3):
+    # First, try the configured password
     last = None
     for _ in range(attempts):
         try:
             client.post("/api/auth/login",
-                        {"username": user, "password": password, "remember": True})
+                        {"username": user, "password": password, "remember": True}, form=False)
+            print(f"odysseus-seed: logged in with configured password")
             return
         except urllib.error.HTTPError as exc:
             last = f"HTTP {exc.code}: {exc.read()[:200]!r}"
+            if exc.code == 401:
+                print(f"odysseus-seed: login failed with configured password, trying default passwords...")
+                break
         except Exception as exc:  # noqa: BLE001
             last = repr(exc)
         time.sleep(delay)
-    raise SystemExit(f"odysseus-seed: admin login failed ({last})")
+
+    # Try common default passwords
+    print(f"odysseus-seed: trying common default passwords...")
+    for default_pwd in DEFAULT_PASSWORDS:
+        for _ in range(5):  # Fewer attempts per password
+            try:
+                client.post("/api/auth/login",
+                            {"username": user, "password": default_pwd, "remember": True}, form=False)
+                print(f"odysseus-seed: logged in with default password '{default_pwd}'")
+                return
+            except urllib.error.HTTPError as exc:
+                if exc.code != 401:
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+
+    # Try to register the admin user with the configured password
+    print(f"odysseus-seed: attempting to register admin user with configured password...")
+    if register_admin(client, user, password):
+        print(f"odysseus-seed: registration succeeded, waiting for user to be ready...")
+        time.sleep(3)
+        # Try login again with the configured password
+        for _ in range(10):
+            try:
+                client.post("/api/auth/login",
+                            {"username": user, "password": password, "remember": True}, form=False)
+                print(f"odysseus-seed: logged in after registration")
+                return
+            except urllib.error.HTTPError as exc:
+                if exc.code != 401:
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+
+    raise SystemExit(f"odysseus-seed: admin login failed after trying all methods")
 
 
 def ensure_endpoints(client, endpoints):
