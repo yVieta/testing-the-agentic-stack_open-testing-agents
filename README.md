@@ -37,7 +37,9 @@ Everything is provisioned with **OpenTofu** from the **nixpkgs** toolchain (no
 NixOS required): `model-setup/` (podman-compose: database + both models),
 `sut-setup/` (rootless SUT pod), `mcp-setup/` (the host MCP bus),
 `agent-setup/` (agent Quadlets) and `odysseus-setup/` (the web workspace).
-`start-services.sh` starts and stops all of them in dependency order.
+The root `deploy/` module composes all five services into one declarative
+configuration. `just deploy` / `just down` / `just status` operate the whole
+stack — no imperative shell scripts in production.
 
 ```mermaid
 graph TD
@@ -104,66 +106,61 @@ personas, tools and tasks:
 
 ```sh
 nix develop -c just              # compile .dhall -> build/<role>/ (+ build/agents/)
-nix develop -c just start        # recompile, then start the whole stack
+nix develop -c just deploy       # deploy the whole stack (root deploy/ module)
 ```
 
-## Tofu/Terraform Usage on the agents services
-Every module (`model-setup/`, `sut-setup/`, `mcp-setup/`, `agent-setup/`,
-`odysseus-setup/`) accepts a `service_state` variable (`running` | `stopped`).
-The agent, SUT and Odysseus modules also take `enable_on_boot` (default
-`false`), so starting them does **not** enable them: nothing comes up by itself
-at boot/login — you start and stop the stack explicitly with the commands
-below. The POSIX script `start-services.sh` wraps them in dependency order:
+## Declarative Root Module (`deploy/`)
+
+The `deploy/` directory is the single declarative controller for the entire
+stack. It composes all five services as child modules with dependency waves
+falling out of OpenTofu's DAG:
 
 ```sh
-./start-services.sh               # start everything: model -> sut -> mcp -> agents -> odysseus
-./start-services.sh stop          # stop everything in reverse order
-./start-services.sh restart       # stop, then start
-./start-services.sh status        # print each module's outputs
-./start-services.sh start model-setup agent-setup   # target a subset
-./start-services.sh --parallel start                 # apply start in waves, concurrently
+# Deploy everything (model + sut + mcp + agents + odysseus)
+tofu -chdir=deploy init
+tofu -chdir=deploy apply -var run_interval=60 -var report_mail_to=test-manager@aigents.local
+
+# With local Odysseus image (your fork with aigents-bus + Lean 4 MCP servers)
+tofu -chdir=deploy apply -var build_app_image=true -var run_interval=60 -var report_mail_to=test-manager@aigents.local
+
+# Stop everything
+tofu -chdir=deploy apply -var service_state=stopped
+
+# Status
+tofu -chdir=deploy output
 ```
 
-`agent-setup` also accepts `run_interval` (seconds between an agent's run
-cycles; default `900` = quiet production cadence, `60` makes the team claim a
-freshly assigned test case within a minute):
+### Justfile Commands (Recommended)
 
 ```sh
-tofu -chdir=agent-setup apply -var run_interval=60
-# or, with just:  nix develop -c just pace 60
+just deploy           # full deploy (root module, service_state=running)
+just down             # stop everything (service_state=stopped)
+just status           # show outputs / service state
+just pace 60          # set run_interval=60 and redeploy agents
+just redeploy         # re-apply root module after code changes
 ```
 
-A full `just start`/`redeploy` applies the default `900` again.
+Variables you can pass via `-var` or set in `deploy/terraform.tfvars`:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `service_state` | `running` | `running` \| `stopped` |
+| `run_interval` | `900` | seconds between agent runs |
+| `report_mail_to` | `""` | mail recipient for test reports |
+| `build_app_image` | `false` | build Odysseus from local `../odysseus` source |
+| `enable_on_boot` | `false` | enable systemd units for auto-start |
 
-#### How fast is a (re)start?
+### Per-Module Direct Control (Advanced)
 
-Each module's `tofu apply` only re-provisions what changed — the triggers are
-content hashes of the rendered units and of the worker scripts / bus server —
-so unchanged services are **not** restarted. Measured on this host:
-
-| Path | What runs | Typical time |
-|------|-----------|--------------|
-| `just start` | converges; only changed modules restart (model/SUT untouched on a code round-trip) | seconds–~9 min |
-| `just redeploy` | code-only: bus + agents + Odysseus, model/SUT stay up | ~9 min |
-| `just redeploy-fast` | same, apply in waves (bus, then agents + Odysseus in parallel) | ~5 min |
-| `just start-fast` | full boot in waves (model+sut+bus, then agents+Odysseus) | ~18 min |
-| `just restart` | full clean cycle: stop all, then start all (model boots 2 llama.cpp servers) | ~22–25 min |
-
-The floor for a full `restart` is the model: two llama.cpp instances
-(phi-4-mini on :18080 with 99 GPU layers, phi-mini-moe on :18081) mmap ~7.5 GB
-of GGUFs and must become healthy before anything else depends on them. For
-pushing code changes, `just redeploy`/`redeploy-fast` is the right tool — the
-model keeps serving while the bus, agents and Odysseus reload.
-
-Or drive a module directly:
+Each module still accepts `service_state` and can be driven independently:
 
 ```sh
-# Start
+# Start in dependency order
 tofu -chdir=model-setup    apply -var service_state=running
 tofu -chdir=sut-setup      apply -var service_state=running
 tofu -chdir=mcp-setup      apply -var service_state=running
 tofu -chdir=agent-setup    apply -var service_state=running
 tofu -chdir=odysseus-setup apply -var service_state=running
+
 # Stop (reverse startup order)
 tofu -chdir=odysseus-setup apply -var service_state=stopped
 tofu -chdir=agent-setup    apply -var service_state=stopped
@@ -221,6 +218,39 @@ Postgres is unavailable and everything else still works.
 a self-hosted AI workspace — as four Podman Quadlet services. It is the browser
 counterpart to the `tm` CLI and gives you a chat UI against the same
 phi-4-mini model (plus the fast phi-mini-moe endpoint).
+
+### Your Odysseus Fork (External Repo)
+
+The Odysseus source is cloned separately as a sibling of this repo:
+
+```
+/var/spool/aigents/
+├── odysseus/                              # Your fork (external)
+│   ├── mcp_servers/aigents_bus_server.py  # MCP server wrapping the aigents bus
+│   ├── mcp_servers/lean_server.py         # Lean 4 formal verification harness
+│   ├── src/builtin_mcp.py                 # Auto-registers both servers
+│   └── Dockerfile                         # Installs Lean 4 via elan
+└── testing-the-agentic-stack-open-testing-agent-/  # This repo
+    ├── deploy/
+    └── odysseus-setup/
+```
+
+Your fork adds two built-in MCP servers that auto-register on Odysseus startup:
+
+| Server | Tools | Purpose |
+|--------|-------|---------|
+| **aigents-bus** | 14 tools | Wraps `http://127.0.0.1:8765/mcp` so the Test Manager in Odysseus chat can dispatch test cases, read findings, start/stop agents, publish notes/documents, and mail reports |
+| **lean4** | 5 tools | Lean 4 / Lake formal verification (`lean_run`, `lake_build`, `lake_test`, `lake_init`, `lean_check`) |
+
+Build the local image instead of pulling upstream:
+
+```sh
+tofu -chdir=deploy apply -var build_app_image=true ...
+```
+
+This runs `podman build` from `/var/spool/aigents/odysseus` and tags it
+`localhost/odysseus:aigents`. The `deploy/` module passes `build_app_image`
+through to `odysseus-setup/`.
 
 ### Logging into the front end
 
@@ -283,6 +313,26 @@ configured, the mail step returns a clear "no SMTP-capable email account
 configured" message and the report is still published as a note/document —
 nothing else breaks.
 
+### Test Manager in Odysseus Chat
+
+When using a tool-capable model (phi-4-mini has native tool calling), the Test
+Manager character in Odysseus chat can directly invoke the aigents-bus tools:
+
+```
+User: "Assign a test case to the e2e agent: test the login flow for SQL injection"
+Assistant: [calls mcp__aigents_bus__assign_test_case]
+```
+
+Available aigents-bus tools in chat:
+- `mcp__aigents_bus__assign_test_case` — dispatch test case to e2e/pentester/both
+- `mcp__aigents_bus__get_findings` — read findings from any role
+- `mcp__aigents_bus__get_agent_status` — check systemd state of agent services
+- `mcp__aigents_bus__start_agent` / `stop_agent` — control agent services
+- `mcp__aigents_bus__publish_process` — publish live process doc to Odysseus
+- `mcp__aigents_bus__publish_note` — publish results note to Notes panel
+- `mcp__aigents_bus__mail_report` — mail final report via Odysseus mail function
+- `mcp__aigents_bus__get_process`, `list_tasks`, `has_open_task`, etc.
+
 ## How the agents talk to each other
 
 All three crews carry the same `custom:aigents_bus` tool, so the e2e engineer,
@@ -340,6 +390,9 @@ of `accepted` lets the crew run.
   `AgentHarness.review` accepts them for that role, giving a mathematically
   guaranteed safety loop. (The Agda source in `skills/agda` is kept for
   traceability.)
+- **Odysseus Integration:** the Lean 4 MCP server (`lean_server.py`) exposes
+  `lean_run`, `lake_build`, `lake_test`, `lake_init`, `lean_check` tools so
+  agents can verify specifications and run formal proofs from within the chat.
 
 ## Hardware & Model Specs
 
