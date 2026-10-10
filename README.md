@@ -370,3 +370,6 @@ prints the full table.
 > Expose the minimum: usually just `18080` (model) and `8080` (SUT) on a
 > trusted network. Postgres and the model API should not leave localhost
 > without `model_api_key` / a DB password.
+
+## Step by step manuals for usage
+- [docs/USER_MANUAL_TEST_CASES.md](./docs/USER_MANUAL_TEST_CASES.md)
