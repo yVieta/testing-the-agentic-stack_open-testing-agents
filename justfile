@@ -75,6 +75,9 @@ start-fast: crews
 stop:
     ./stop-services.sh
 
+# Fully shut down everything (containers + systemd user units). Same as `stop`.
+shutdown: stop
+
 # Stop then start everything — the full clean cycle (~22-25 min; the model
 # boots two llama.cpp servers, so most of the time is unavoidable).
 restart:
