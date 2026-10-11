@@ -4,7 +4,8 @@ Deploys [Odysseus](https://github.com/odysseus-dev/odysseus) — a self-hosted A
 workspace — as four Podman **Quadlet** user services via OpenTofu, exactly like
 `sut-setup`/`agent-setup`. Odysseus gives you a browser UI to chat with the
 local phi-4-mini model (and the fast phi-mini-moe) and to run an agent with the
-test-manager persona.
+test-manager persona. There is a [forked version of Odysseus](https://github.com/yVieta/odysseus) 
+with some modifications for the lean4 implementation.
 
 ## What it deploys
 
