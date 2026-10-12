@@ -1,5 +1,8 @@
 # open-testing-agents:selfhost
 
+Video Presentataion can be found at https://codeberg.org/spifamily/open-testing-agents-abgabe
+A presetation about this project is also [in](./presentation)
+
 A self-hosted, fully declarative **testing lab** you can run on a single
 machine: three AI agents — an **e2e engineer**, a **pentester** and a **test
 manager** — test a real web application (**OWASP Juice Shop**), chain their
