@@ -1,5 +1,11 @@
 # model-setup
 
+> **Normally driven by the root `deploy/` module.** This directory is a child
+> module; applying it standalone (`tofu -chdir=model-setup apply`) creates a
+> *second* state that manages the same units and drifts from the root. For
+> normal use: `just start` / `just stop` (or
+> `tofu -chdir=deploy apply -var service_state=running|stopped`).
+
 OpenTofu for the **model + vector store** side of the self-hosted server:
 two llama.cpp instances — **phi-4-mini** (primary agent brain) and
 **phi-mini-moe** (secondary fast model) — plus **PostgreSQL + pgvector**,
@@ -105,7 +111,7 @@ module actually binds `0.0.0.0`.
 
 ### Port matrix (defaults)
 
-Reachable from a LAN device as `http://<host-ip>:<port>`. `tofu -chdir=model-setup output -json lan_matrix` prints it too.
+Reachable from a LAN device as `http://<host-ip>:<port>`. `tofu -chdir=deploy output -json lan_matrix` prints it too.
 
 | Service | Port | Owner module | Bind via |
 |---------|------|--------------|----------|

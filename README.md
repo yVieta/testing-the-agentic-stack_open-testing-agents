@@ -114,11 +114,11 @@ nix develop -c just deploy       # deploy the whole stack (root deploy/ module)
 ## Declarative Root Module (`deploy/`)
 
 The `deploy/` directory is the single declarative controller for the entire
-stack. It composes all four services as child modules with dependency waves
-falling out of OpenTofu's DAG:
+stack. It composes every service (model, SUT, MCP bus, agents, Odysseus) as
+child modules with dependency waves falling out of OpenTofu's DAG:
 
 ```sh
-# Deploy everything (model + sut + mcp + agents)
+# Deploy everything (model, sut, mcp, agents, odysseus)
 tofu -chdir=deploy init
 tofu -chdir=deploy apply -var run_interval=60 -var report_mail_to=test-manager@aigents.local
 
@@ -157,29 +157,27 @@ Variables you can pass via `-var` or set in `deploy/terraform.tfvars`:
 | `report_mail_to` | `""` | mail recipient for test reports (via MCP bus) |
 | `enable_on_boot` | `false` | enable systemd units for auto-start |
 
-### Per-Module Direct Control (Advanced)
+### Targeted module control (Advanced)
 
-Each module still accepts `service_state` and can be driven independently:
+To converge just part of the stack, scope a **root** apply with `-target`
+(never `-chdir` into a child module — that forks the state):
 
 ```sh
-# Start in dependency order
-tofu -chdir=model-setup    apply -var service_state=running
-tofu -chdir=sut-setup      apply -var service_state=running
-tofu -chdir=mcp-setup      apply -var service_state=running
-tofu -chdir=agent-setup    apply -var service_state=running
+# only the agents (e.g. after editing a crew/persona)
+tofu -chdir=deploy apply -var service_state=running -target=module.agents
 
-# Stop (reverse startup order)
-tofu -chdir=agent-setup    apply -var service_state=stopped
-tofu -chdir=mcp-setup      apply -var service_state=stopped
-tofu -chdir=sut-setup      apply -var service_state=stopped
-tofu -chdir=model-setup    apply -var service_state=stopped
+# code round-trip: bus + agents + Odysseus, keep model + SUT up
+tofu -chdir=deploy apply -var service_state=running \
+  -target=module.mcp -target=module.agents -target=module.odysseus
+
+# stop just the agents
+tofu -chdir=deploy apply -var service_state=stopped -target=module.agents
 ```
 
 Stopping keeps all state: podman images, GGUF weights, the Postgres data
-directory and the agent volumes are untouched. `tofu destroy` in each
-module removes the declared configuration completely — note the state is
-currently git-ignored and was dropped, so on a fresh checkout `destroy` cannot
-find the deployed services.
+directory and the agent volumes are untouched. Removing the configured units
+entirely is a deliberate `tofu -chdir=deploy destroy`; the state is git-ignored,
+so on a fresh checkout there is nothing to destroy until you deploy.
 
 ## Test manager CLI (controller console)
 
@@ -380,7 +378,7 @@ expose_ports   = [18080, 18081, 15432, 8080, 3001, 8765]
 
 Also set `bind_address = "0.0.0.0"` in `sut-setup` and
 `mcp_host = "0.0.0.0"` in `mcp-setup`. Only list a port in `expose_ports` when
-its owning module actually binds `0.0.0.0`. `tofu -chdir=model-setup output -json lan_matrix`
+its owning module actually binds `0.0.0.0`. `tofu -chdir=deploy output -json lan_matrix`
 prints the full table.
 
 | Service | Port | Owner module | Bind via |

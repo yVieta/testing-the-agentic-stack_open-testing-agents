@@ -1,5 +1,11 @@
 # agent-setup
 
+> **Normally driven by the root `deploy/` module.** This directory is a child
+> module; applying it standalone (`tofu -chdir=agent-setup apply`) creates a
+> *second* state that manages the same units and drifts from the root. For
+> normal use: `just start` / `just stop` (or
+> `tofu -chdir=deploy apply -var service_state=running|stopped`).
+
 OpenTofu for the **testing agents** themselves: they now run **locally** on the
 same server, each as a Podman Quadlet service — no MQTT, no Raspberry Pis. Each
 agent connects **directly** to the local model stack (`phi-4-mini` primary on

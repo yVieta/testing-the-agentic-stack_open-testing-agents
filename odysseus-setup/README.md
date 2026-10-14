@@ -1,5 +1,11 @@
 # odysseus-setup
 
+> **Normally driven by the root `deploy/` module.** This directory is a child
+> module; applying it standalone (`tofu -chdir=odysseus-setup apply`) creates a
+> *second* state that manages the same units and drifts from the root. For
+> normal use: `just start` / `just stop` (or
+> `tofu -chdir=deploy apply -var service_state=running|stopped`).
+
 Deploys [Odysseus](https://github.com/odysseus-dev/odysseus) — a self-hosted AI
 workspace — as four Podman **Quadlet** user services via OpenTofu, exactly like
 `sut-setup`/`agent-setup`. Odysseus gives you a browser UI to chat with the

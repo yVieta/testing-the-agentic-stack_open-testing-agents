@@ -1,5 +1,11 @@
 # iacSUT
 
+> **Normally driven by the root `deploy/` module.** This directory is a child
+> module; applying it standalone (`tofu -chdir=sut-setup apply`) creates a
+> *second* state that manages the same units and drifts from the root. For
+> normal use: `just start` / `just stop` (or
+> `tofu -chdir=deploy apply -var service_state=running|stopped`).
+
 Declarative rootless deployment of the system-under-test (Juice Shop + Grafana,
 proxied by nginx) as Podman Quadlet **user** services. No root required: no
 package installs, no firewall changes, and services are bound to `127.0.0.1`

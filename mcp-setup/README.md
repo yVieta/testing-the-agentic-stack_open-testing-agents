@@ -1,5 +1,11 @@
 # mcp-setup
 
+> **Normally driven by the root `deploy/` module.** This directory is a child
+> module; applying it standalone (`tofu -chdir=mcp-setup apply`) creates a
+> *second* state that manages the same units and drifts from the root. For
+> normal use: `just start` / `just stop` (or
+> `tofu -chdir=deploy apply -var service_state=running|stopped`).
+
 OpenTofu for the **MCP knowledge + control bus** — an optional but central piece
 of the stack. It runs **on the host** (not in a container) as a systemd **user**
 service so it can drive the agent units with `systemctl --user` and reach

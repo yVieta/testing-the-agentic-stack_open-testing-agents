@@ -47,6 +47,11 @@ output "model" {
   }
 }
 
+output "lan_matrix" {
+  description = "Per-service bind/port table for exposing the stack on a LAN (see model-setup)."
+  value       = module.model.lan_matrix
+}
+
 output "services" {
   description = "Every systemd user service managed by this deployment, by module."
   value = {
