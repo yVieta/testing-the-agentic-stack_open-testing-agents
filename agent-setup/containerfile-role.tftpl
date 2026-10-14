@@ -1,0 +1,45 @@
+# GENERATED per-role agent image layer.
+#
+# Rendered by agent-setup from the declarative tool catalog (tools.tf) and
+# written to agent-setup/.build/${role}/Containerfile. Do not edit by hand:
+# change the catalog (var.tools / var.tools_overrides) and re-apply.
+#
+# Role: ${role}
+FROM ${base_image}
+
+USER root
+
+%{ for k, v in env ~}
+ENV ${k}=${v}
+%{ endfor ~}
+%{ if length(apt) > 0 ~}
+
+# Debian packages for this role's tools
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ${join(" ", apt)} \
+ && rm -rf /var/lib/apt/lists/*
+%{ endif ~}
+%{ if length(pip) > 0 ~}
+
+# Python packages
+RUN pip install --no-cache-dir %{ for p in pip }'${p}' %{ endfor ~}
+%{ endif ~}
+%{ if length(go) > 0 ~}
+
+# Go-installed tools
+RUN GOBIN=/usr/local/bin GOFLAGS=-mod=mod go install ${join(" ", go)}
+%{ endif ~}
+%{ for b in binary ~}
+
+RUN curl -fsSL "${b.url}" -o "${b.dest}" && chmod ${b.mode} "${b.dest}"
+%{ endfor ~}
+%{ for c in run ~}
+
+RUN ${c}
+%{ endfor ~}
+
+# Declarative manifest + exec allow-list for this role (from tools.tf)
+COPY tools.json /etc/aigents/tools.json
+COPY allowed-commands.txt /etc/aigents/allowed-commands.txt
+
+WORKDIR /repo

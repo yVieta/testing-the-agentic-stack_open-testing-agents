@@ -8,9 +8,23 @@ output "services" {
   value       = [for role in sort(keys(var.roles)) : "agent-${role}.service"]
 }
 
-output "agent_image" {
-  description = "Image the agent containers run (built by this module)."
-  value       = var.agent_image
+output "agent_images" {
+  description = "Images the agent containers run: the shared base plus each per-role tool layer (built by this module)."
+  value = {
+    base  = local.base_image
+    roles = local.role_image
+  }
+}
+
+output "agent_tools" {
+  description = "Declarative tool catalog per role (from tools.tf): the tools each role image installs and may execute."
+  value = {
+    for role, tools in local.role_tools : role => {
+      tools        = sort(keys(tools))
+      bins         = local.role_bins[role]
+      capabilities = local.role_capabilities[role]
+    }
+  }
 }
 
 output "reach" {

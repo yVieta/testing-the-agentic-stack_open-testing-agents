@@ -26,7 +26,8 @@ output "agents" {
   value = {
     services     = module.agents.services
     quadlets     = module.agents.agent_quadlets
-    image        = module.agents.agent_image
+    images       = module.agents.agent_images
+    tools        = module.agents.agent_tools
     reach        = module.agents.reach
     run_interval = var.run_interval
   }

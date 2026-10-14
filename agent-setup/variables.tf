@@ -58,10 +58,16 @@ variable "mcp_url" {
   default     = "http://127.0.0.1:8765/mcp"
 }
 
-variable "agent_image" {
+variable "agent_image_prefix" {
   type        = string
-  description = "Image tag for the agent container (built from this module's Containerfile)."
+  description = "Prefix for the per-role agent images. The base is built as <prefix>-base and each role as <prefix>-<role> (e.g. localhost/aigents-agent-pentester)."
   default     = "localhost/aigents-agent"
+}
+
+variable "agent_base_image" {
+  type        = string
+  description = "Tag for the shared agent base image (python + crewai + lean), from which the per-role tool layers are built."
+  default     = "localhost/aigents-agent-base"
 }
 
 variable "build_agent_image" {

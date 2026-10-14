@@ -30,9 +30,9 @@ locals {
 module "model" {
   source = "../model-setup"
 
-  home_dir             = var.home_dir
-  spool_root           = var.spool_root
-  service_state        = var.service_state
+  home_dir                = var.home_dir
+  spool_root              = var.spool_root
+  service_state           = var.service_state
   secondary_model_enabled = var.secondary_model_enabled
 }
 
@@ -41,8 +41,8 @@ module "model" {
 module "sut" {
   source = "../sut-setup"
 
-  home_dir      = var.home_dir
-  service_state = var.service_state
+  home_dir        = var.home_dir
+  service_state   = var.service_state
   grafana_enabled = var.grafana_enabled
 }
 
@@ -80,6 +80,7 @@ module "agents" {
   run_interval      = var.run_interval
   roles             = var.roles
   build_agent_image = var.build_agent_image
+  tools_overrides   = var.tools_overrides
   enable_on_boot    = var.enable_on_boot
   service_state     = var.service_state
 }
@@ -90,10 +91,10 @@ module "odysseus" {
   source     = "../odysseus-setup"
   depends_on = [module.model]
 
-  home_dir       = var.home_dir
-  spool_root     = var.spool_root
-  report_mail_to = var.report_mail_to
-  enable_on_boot = var.enable_on_boot
+  home_dir        = var.home_dir
+  spool_root      = var.spool_root
+  report_mail_to  = var.report_mail_to
+  enable_on_boot  = var.enable_on_boot
   build_app_image = var.build_app_image
-  service_state  = var.service_state
+  service_state   = var.service_state
 }

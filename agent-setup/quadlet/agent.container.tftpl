@@ -10,6 +10,9 @@ Description=aigents testing agent ${agent_role} (crew ${role_dir})
 Image=${image}
 Pull=never
 Network=host
+%{ for cap in capabilities ~}
+AddCapability=${cap}
+%{ endfor ~}
 Volume=${repo_dir}:/repo:ro,Z
 Volume=${credential_file}:/run/secrets/credentials.env:ro,Z
 Volume=${results_dir}/${role_dir}:/results:rw,Z

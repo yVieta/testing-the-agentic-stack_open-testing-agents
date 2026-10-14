@@ -5,3 +5,6 @@ terraform.tfstate.backup
 plan.tfplan
 .terraform/
 .terraform.lock.hcl
+
+# Generated per-role tool layers / images build context (from tools.tf).
+.build/

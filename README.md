@@ -297,7 +297,20 @@ instead of pretending a broken run passed.
 
 All three crews carry `custom:aigents_bus`, so the roles also read each other's
 findings and the manager's direction directly off the bus (see *How the agents
-talk to each other*).
+talk to each other*). The pentester additionally carries `custom:run_command`, a
+controlled exec tool (allow-listed binaries, no shell, SUT-scoped) that lets it
+actually run its scanners and cite the real output.
+
+### Tools are declarative too
+
+Which CLI tools a role gets is data, not Dockerfile edits. `agent-setup/tools.tf`
+holds one catalog entry per tool (`enabled`, `roles`, `apt`/`pip`/`go`/`binary`/
+`run`/`env`, the `bins` it exposes for `run_command`, and optional
+`capabilities`). OpenTofu renders each role's thin image layer on top of a shared
+base — e2e gets Playwright, the pentester gets nmap/nikto/sqlmap/nuclei/whatweb/
+ffuf/gobuster/hydra, the manager gets neither — and the `bins` become that role's
+`run_command` allow-list. Add or remove a tool by editing the catalog (or passing
+`tools_overrides`) and re-applying; nothing else changes.
 
 Agents also load crewAI **skills** from `skills/` (progressive disclosure via
 `SKILL.md`): `test-manager-report` for the manager, `playwright-testing` for the

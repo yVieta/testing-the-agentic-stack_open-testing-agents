@@ -109,6 +109,12 @@ variable "build_app_image" {
   default     = false
 }
 
+variable "tools_overrides" {
+  description = "Additive overrides to the agent tool catalog (see agent-setup/tools.tf). Add a tool by adding an entry; disable one with `enabled = false`. Shallow-merged over the built-in catalog, so a modified entry must restate the fields it keeps."
+  type        = map(any)
+  default     = {}
+}
+
 variable "enable_on_boot" {
   type        = bool
   description = "Enable every service in the user's default.target so it starts automatically at boot/login. disabled (default): services are running now, started declaratively by `just deploy`."

@@ -6,15 +6,30 @@ locals {
   repo_dir             = var.repo_dir != "" ? var.repo_dir : abspath("${path.module}/..")
   credential_file      = var.credential_file != "" ? var.credential_file : "${var.spool_root}/database/secrets/credentials.env"
   # Results directory for test artifacts (Playwright screenshots, reports, etc.)
-  results_dir          = var.results_dir != "" ? var.results_dir : "${var.spool_root}/results"
+  results_dir = var.results_dir != "" ? var.results_dir : "${var.spool_root}/results"
+
+  # --- declarative tool layers -------------------------------------------
+  # One shared base image + a thin per-role layer generated from the catalog in
+  # tools.tf (e2e -> Playwright, pentester -> scanners, manager -> neither).
+  base_image = var.agent_base_image
+  role_image = { for role in keys(var.roles) : role => "${var.agent_image_prefix}-${role}" }
+  build_dir  = "${path.module}/.build"
 }
 
-# --- agent image ------------------------------------------------------------
+# --- agent images -----------------------------------------------------------
+#
+# Two layers, both declarative:
+#   1. the shared BASE image (python + crewai + lean + curl/git) from
+#      agent-setup/Containerfile;
+#   2. a thin PER-ROLE layer generated from the tool catalog (tools.tf) into
+#      agent-setup/.build/<role>/{Containerfile,tools.json,allowed-commands.txt}
+#      and built FROM the base.
+#
+# The role directory is the build context, so no generated file ever has to be
+# committed. The whole thing only rebuilds when the catalog or a source changes.
 
-# One image for all agents: python + crewai + psycopg + lean4 (elan) with the
-# formal harness pre-built. Build context is the repo root so skills/lean and
-# worker/ can be baked into /opt/harness.
-resource "null_resource" "build_agent_image" {
+# 1. base image
+resource "null_resource" "build_agent_base_image" {
   count = var.build_agent_image ? 1 : 0
 
   triggers = {
@@ -28,7 +43,64 @@ resource "null_resource" "build_agent_image" {
   provisioner "local-exec" {
     command = <<-EOT
       export XDG_RUNTIME_DIR=/run/user/$(id -u)
-      podman build -f "${path.module}/Containerfile" -t "${var.agent_image}" "${local.repo_dir}"
+      podman build -f "${path.module}/Containerfile" -t "${local.base_image}" "${local.repo_dir}"
+    EOT
+  }
+}
+
+# 2. generated per-role artifacts (build context)
+resource "local_file" "role_containerfile" {
+  for_each = var.roles
+
+  filename = "${local.build_dir}/${each.key}/Containerfile"
+  content = templatefile("${path.module}/containerfile-role.tftpl", {
+    base_image = local.base_image
+    role       = each.key
+    apt        = local.role_apt[each.key]
+    pip        = local.role_pip[each.key]
+    go         = local.role_go[each.key]
+    binary     = local.role_binaries[each.key]
+    run        = local.role_run[each.key]
+    env        = local.role_env[each.key]
+  })
+}
+
+resource "local_file" "role_tools_manifest" {
+  for_each = var.roles
+
+  filename = "${local.build_dir}/${each.key}/tools.json"
+  content  = local.role_tools_json[each.key]
+}
+
+resource "local_file" "role_allowlist" {
+  for_each = var.roles
+
+  filename = "${local.build_dir}/${each.key}/allowed-commands.txt"
+  content  = local.role_allowlist[each.key]
+}
+
+# 3. per-role image (thin layer FROM the base)
+resource "null_resource" "build_agent_role_image" {
+  for_each = var.build_agent_image ? var.roles : {}
+
+  depends_on = [
+    null_resource.build_agent_base_image,
+    local_file.role_containerfile,
+    local_file.role_tools_manifest,
+    local_file.role_allowlist,
+  ]
+
+  triggers = {
+    base          = filesha256("${path.module}/Containerfile")
+    containerfile = sha256(local_file.role_containerfile[each.key].content)
+    manifest      = sha256(local_file.role_tools_manifest[each.key].content)
+    allowlist     = sha256(local_file.role_allowlist[each.key].content)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      export XDG_RUNTIME_DIR=/run/user/$(id -u)
+      podman build -f "${local.build_dir}/${each.key}/Containerfile" -t "${local.role_image[each.key]}" "${local.build_dir}/${each.key}"
     EOT
   }
 }
@@ -68,19 +140,20 @@ resource "local_file" "agent_quadlet" {
 
   filename = "${local.expanded_quadlet_dir}/agent-${each.key}.container"
   content = templatefile("${path.module}/quadlet/agent.container.tftpl", {
-    repo_dir             = local.repo_dir
-    image                = var.agent_image
-    role_dir             = each.key   # build/<role>
-    agent_role           = each.value # manifest agent name
-    model_url            = var.model_url
-    model_name           = var.model_name
-    model_fast_url       = var.model_fast_url
-    model_fast_name      = var.model_fast_name
-    target_url           = var.target_url
-    mcp_url              = var.mcp_url
-    run_interval         = var.run_interval
-    credential_file      = local.credential_file
-    results_dir          = local.results_dir
+    repo_dir        = local.repo_dir
+    image           = local.role_image[each.key]
+    role_dir        = each.key   # build/<role>
+    agent_role      = each.value # manifest agent name
+    capabilities    = local.role_capabilities[each.key]
+    model_url       = var.model_url
+    model_name      = var.model_name
+    model_fast_url  = var.model_fast_url
+    model_fast_name = var.model_fast_name
+    target_url      = var.target_url
+    mcp_url         = var.mcp_url
+    run_interval    = var.run_interval
+    credential_file = local.credential_file
+    results_dir     = local.results_dir
   })
 }
 
@@ -89,7 +162,8 @@ resource "local_file" "agent_quadlet" {
 resource "null_resource" "start_agents" {
   depends_on = [
     local_file.agent_quadlet,
-    null_resource.build_agent_image,
+    null_resource.build_agent_base_image,
+    null_resource.build_agent_role_image,
   ]
 
   triggers = {
@@ -103,6 +177,10 @@ resource "null_resource" "start_agents" {
     worker      = filesha256("${local.repo_dir}/worker/run_agent.py")
     mcp_bus     = filesha256("${local.repo_dir}/worker/mcp_bus.py")
     crew_tool   = filesha256("${local.repo_dir}/worker/crew_tools/aigents_bus.py")
+    # The declarative tool catalog: changing it rebuilds the role images and
+    # restarts the agents so the new tools are picked up.
+    tools           = jsonencode(var.tools)
+    tools_overrides = jsonencode(var.tools_overrides)
   }
 
   provisioner "local-exec" {

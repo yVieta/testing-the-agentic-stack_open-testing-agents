@@ -1,8 +1,15 @@
-# Agent runtime: crewAI + the Lean4 harness (elan-installed toolchain) +
-# postgres client. Built by agent-setup with the repo root as build context.
+# Agent runtime BASE image: crewAI + the Lean4 harness (elan-installed
+# toolchain) + postgres client + curl/git. Built by agent-setup with the repo
+# root as build context, tagged `localhost/aigents-agent-base`.
+#
+# Role-specific tools (Playwright for e2e, the scanners for the pentester, ...)
+# are NOT baked in here: they are declared in agent-setup/tools.tf and layered
+# on top of this base by the generated per-role image (containerfile-role.tftpl
+# -> .build/<role>/Containerfile). See tools.tf for the catalog.
 FROM docker.io/library/python:3.12-slim
 
-# build essentials + toolchain downloader
+# build essentials + toolchain downloader. curl/git are also used by the role
+# layers (binary downloads, git-based tools like nikto).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git \
  && rm -rf /var/lib/apt/lists/*
@@ -20,15 +27,6 @@ RUN curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-ini
 RUN pip install --no-cache-dir \
       "crewai[tools,litellm]>=1.15.20,<2.0.0" \
       "psycopg[binary]>=3.2"
-
-# Playwright + a system-wide Chromium so the e2e agent drives a real browser.
-# PLAYWRIGHT_BROWSERS_PATH keeps the browser out of the venv crewai builds with
-# --system-site-packages, so it stays visible at runtime; `playwright install
-# --with-deps` also pulls the shared libraries Chromium needs.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN pip install --no-cache-dir "playwright>=1.47,<2.0.0" \
- && playwright install --with-deps chromium \
- && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
 # bake the formal harness into the image (repo stays read-only at runtime)
 COPY skills/lean /opt/harness/
