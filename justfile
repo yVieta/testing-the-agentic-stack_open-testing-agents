@@ -55,52 +55,56 @@ shell:
 tm:
     nix develop -c python3 worker/tm_cli.py
 
-# Compile the crews + agent persona, then start every service (model, SUT,
-# MCP bus, agents, Odysseus). Run as `nix develop -c just start` so
-# dhall-to-json is on PATH for the `crews` step.
+# Lifecycle — one declarative controller (`deploy/`), no per-module scripts.
 #
-# `tofu apply` restarts only modules whose triggers changed (rendered units and
-# content hashes of the worker scripts/bus server), so on a code round-trip the
-# model and SUT are skipped automatically and this converges in minutes.
+# `deploy/` composes every module and owns `service_state`; OpenTofu's DAG
+# orders them (agents/Odysseus wait for the model, independents apply in
+# parallel) and only re-runs a unit when its rendered content changed. There is
+# no per-module state to keep in sync — do NOT apply a `*-setup/` module
+# directly, that would fork the state (see README). Run as
+# `nix develop -c just start` so dhall-to-json is on PATH for `crews`.
+
+# Start/converge the whole stack (model, SUT, bus, agents, Odysseus).
 start: crews
-    ./start-services.sh
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running
 
-# Same as `start` but applies the modules in dependency waves, concurrently:
-# wave 1 = model+sut+bus, wave 2 = agents+odysseus. Full clean boot in ~18 min
-# instead of ~22-25 sequential.
-start-fast: crews
-    ./start-services.sh --parallel start
+# Alias of `start` (kept for older docs).
+deploy: start
 
-# Stop every service in reverse order (Odysseus -> agents -> SUT -> model).
+# Alias of `start` (OpenTofu already parallelises independent modules).
+start-fast: start
+
+# Stop every service (each module stops its units).
 stop:
-    ./stop-services.sh
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=stopped
 
-# Fully shut down everything (containers + systemd user units). Same as `stop`.
+# Alias of `stop`.
+down: stop
+
+# Alias of `stop`.
 shutdown: stop
 
-# Stop then start everything — the full clean cycle (~22-25 min; the model
-# boots two llama.cpp servers, so most of the time is unavoidable).
+# Stop then start (full clean cycle; the model boot dominates the time).
 restart:
-    ./start-services.sh restart
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=stopped
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running
 
-# Code round-trip (default): converge only the code modules (MCP bus, agents,
-# Odysseus) and keep the model + SUT running. ~9 min on this host.
+# Code round-trip: reconverge bus + agents + Odysseus, keep model + SUT up.
 redeploy:
-    ./start-services.sh start mcp-setup agent-setup odysseus-setup
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running \
+        -target=module.mcp -target=module.agents -target=module.odysseus
 
-redeploy-fast:
-    ./start-services.sh --parallel start mcp-setup agent-setup odysseus-setup
+# Alias of `redeploy`.
+redeploy-fast: redeploy
 
-# Agent run cadence in seconds (`just pace 900` = quiet production, `just pace
-# 60` = the team responds to a freshly assigned case within a minute). Applies
-# agent-setup only; `start`/`redeploy` fall back to the 900s default again.
+# Set the agent run interval (seconds) and reconverge the agents.
 pace seconds:
-    tofu -chdir=agent-setup apply -var service_state=running \
-        -var run_interval={{ seconds }}
+    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running \
+        -var run_interval={{ seconds }} -target=module.agents
 
-# Show the tofu outputs (service URLs / state) for each module.
+# Show the stack outputs (service URLs / state).
 status:
-    ./start-services.sh status
+    tofu -chdir=deploy output
 
 # Remove build/.
 clean:

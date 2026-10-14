@@ -78,7 +78,7 @@ variable "enable_linger" {
 
 variable "enable_on_boot" {
   type        = bool
-  description = "Enable the bus unit in the user's default.target so it starts automatically at boot/login. Default false: start it explicitly (systemctl --user start aigents-mcp.service, or ./start-services.sh)."
+  description = "Enable the bus unit in the user's default.target so it starts automatically at boot/login. Default false: start it explicitly (systemctl --user start aigents-mcp.service, or `just start`)."
   default     = false
 }
 

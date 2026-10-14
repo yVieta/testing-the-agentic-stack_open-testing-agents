@@ -129,6 +129,16 @@ tofu -chdir=deploy apply -var service_state=stopped
 tofu -chdir=deploy output
 ```
 
+> **Single state, single controller.** Drive the stack only through `deploy/`
+> (or the `just` recipes). The `*-setup/` child modules are *libraries* sourced
+> by `deploy/`; applying one directly (`tofu -chdir=agent-setup apply`) creates a
+> second state that manages the same units and will drift from the root. If that
+> has happened, stop everything through `deploy/`, confirm
+> `tofu -chdir=deploy state list` covers every module, then remove the stale
+> per-module `terraform.tfstate` files. The stack-lifecycle commands
+> (`just start` / `just stop` / `just shutdown` / `just redeploy` / `just pace`)
+> all go through the root module — there is no per-module script.
+
 ### Justfile Commands (Recommended)
 
 ```sh

@@ -48,8 +48,8 @@ tofu apply -var service_state=stopped   # disable + stop
 
 State lives in SQLite at `<spool_root>/mcp/mcp.db`; the unit is
 `~/.config/systemd/user/aigents-mcp.service`. Starting is also covered by the
-repo-root `../start-services.sh` (runs after `sut-setup`, before
-`agent-setup`).
+repo-root declarative controller (`just start` → `tofu -chdir=deploy apply
+-var service_state=running`), which brings up every module in dependency order.
 
 ```sh
 systemctl --user status aigents-mcp

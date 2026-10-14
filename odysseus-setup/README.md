@@ -105,6 +105,6 @@ tofu apply \
 The seeding is skipped when `service_state=stopped`, and re-running `apply`
 never creates duplicate endpoints or presets.
 
-Starting/stopping this module is also covered by the repo-root
-`../start-services.sh` wrapper (it runs `odysseus-setup` last on start and
-first on stop).
+Starting/stopping this module is also covered by the repo-root declarative
+controller (`just start` → `tofu -chdir=deploy apply -var service_state=running`),
+which brings the stack up in dependency order.

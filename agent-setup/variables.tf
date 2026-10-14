@@ -112,7 +112,7 @@ variable "enable_linger" {
 
 variable "enable_on_boot" {
   type        = bool
-  description = "Enable the agent units in the user's default.target so they start automatically at boot/login. Default false: services are started now but not enabled, so start them explicitly (systemctl --user start agent-<role>.service, or ./start-services.sh)."
+  description = "Enable the agent units in the user's default.target so they start automatically at boot/login. Default false: services are started now but not enabled, so start them explicitly (systemctl --user start agent-<role>.service, or `just start`)."
   default     = false
 }
 

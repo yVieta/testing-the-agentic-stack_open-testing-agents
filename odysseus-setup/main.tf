@@ -250,54 +250,36 @@ resource "local_file" "ntfy_quadlet" {
   })
 }
 
-# Track admin password hash to detect changes and force re-initialization
+# Track admin password hash so we can detect a real credential change.
 resource "local_file" "admin_password_hash" {
   filename = "${local.odysseus_dir}/.admin_password_hash"
   content  = sha256(local.admin_password)
 }
 
-# Clean up Odysseus data when admin password changes to force re-initialization
-# Also pre-create auth.json with the correct password hash so the app uses our password
+# When the admin password changes, drop the stored user file so the app's
+# setup.py re-creates it from ODYSSEUS_ADMIN_PASSWORD on the next start.
+#
+# NOTE: this must NOT react to `service_state`. If it did, every plain
+# stop/start would replace the resource and wipe the credential on each start.
+# auth.json is the user store (core/auth.py); the rest of data/ (app.db,
+# workspace, caches) is deliberately left untouched.
 resource "null_resource" "reinit_odysseus_on_password_change" {
   depends_on = [local_sensitive_file.credentials_env, local_file.admin_password_hash]
 
   triggers = {
     password_hash = local_file.admin_password_hash.content
-    service_state = var.service_state
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       set -eu
-      if [ "${var.service_state}" = "stopped" ]; then
-        exit 0
-      fi
-      echo "Admin password changed, removing Odysseus data to force re-initialization..."
-      rm -rf "${local.odysseus_dir}/data" "${local.odysseus_dir}/logs" 2>/dev/null || true
-      mkdir -p "${local.odysseus_dir}/data" "${local.odysseus_dir}/logs" "${local.odysseus_dir}/services/cache/search"
-
-      # Pre-create auth.json with the correct password hash so the app uses our password
-      ADMIN_PASSWORD="${local.admin_password}"
-      # Generate bcrypt hash using Python
-      PASSWORD_HASH=$(python3 -c "
-import bcrypt, sys
-pwd = sys.argv[1].encode()
-hash = bcrypt.hashpw(pwd, bcrypt.gensalt(rounds=12))
-print(hash.decode())
-" "\$ADMIN_PASSWORD")
-      mkdir -p "${local.odysseus_dir}/data"
-      cat > "${local.odysseus_dir}/data/auth.json" <<EOF
-{
-  "users": {
-    "admin": {
-      "password_hash": "\$PASSWORD_HASH",
-      "is_admin": true
-    }
-  }
-}
-EOF
-      chmod 600 "${local.odysseus_dir}/data/auth.json"
-      echo "Pre-created auth.json with correct password hash"
+      export XDG_RUNTIME_DIR=/run/user/$(id -u)
+      # Rootless podman maps the container's PUID to a host subuid, so auth.json
+      # is not writable by this user directly. Unlink it from inside the podman
+      # user namespace (where this user is root) and let setup.py re-seed it
+      # from the new password when start_odysseus restarts the app.
+      podman unshare rm -f "${local.odysseus_dir}/data/auth.json" || true
+      echo "Admin password changed: removed auth.json; the app will re-seed it."
     EOT
   }
 }

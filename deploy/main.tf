@@ -11,8 +11,11 @@
 #   module.odysseus  Workspace + chrome/ntfy/searxng  (needs module.model)
 #
 # Dependency waves fall out of OpenTofu's DAG: independent modules apply
-# concurrently (-parallelism), and agents/odysseus only apply after the model —
-# that is the declarative replacement for the old imperative start-services.sh.
+# concurrently (-parallelism), and agents/odysseus only apply after the model.
+# This root module is the single controller — drive the lifecycle through it
+# (`just start` / `just stop` / `just redeploy`) and never apply a `*-setup/`
+# module directly, which would fork the state. The old imperative
+# start-services.sh has been removed.
 # Each module still owns its quadlet/systemd units and all runtime state; this
 # root only wires shared values and the desired `service_state`.
 #
