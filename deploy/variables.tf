@@ -65,6 +65,11 @@ variable "mcp_host" {
   type        = string
   description = "Interface the MCP bus binds (localhost-only by default; the agent containers reach it over host networking)."
   default     = "127.0.0.1"
+
+  validation {
+    condition     = contains(["127.0.0.1", "::1", "localhost"], var.mcp_host)
+    error_message = "The MCP bus has no authentication; keep mcp_host on loopback (127.0.0.1 / ::1 / localhost)."
+  }
 }
 
 variable "mcp_port" {
@@ -118,6 +123,12 @@ variable "tools_overrides" {
 variable "enable_on_boot" {
   type        = bool
   description = "Enable every service in the user's default.target so it starts automatically at boot/login. disabled (default): services are running now, started declaratively by `just deploy`."
+  default     = false
+}
+
+variable "enable_linger" {
+  type        = bool
+  description = "Keep the systemd user manager (and any running units) alive after the operator logs out. Disabled (default): nothing lingers once you log out, and `just stop`/`just shutdown` also disables lingering. Enable together with enable_on_boot for an unattended server."
   default     = false
 }
 

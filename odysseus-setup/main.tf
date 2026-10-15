@@ -21,11 +21,20 @@ resource "random_password" "admin_password" {
   keepers = {
     gen = "2"
   }
+
+  # Never regenerate/delete the admin password by accident.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "random_password" "searxng_secret" {
   length  = 64
   special = false
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # --- local odysseus image build ------------------------------------------------
@@ -204,6 +213,7 @@ resource "local_file" "app_quadlet" {
     imap_user             = var.imap_user
     imap_password         = var.imap_password
     email_from            = var.email_from
+    enable_on_boot        = var.enable_on_boot
   })
 }
 
@@ -226,6 +236,7 @@ resource "local_file" "chromadb_quadlet" {
     chromadb_image = var.chromadb_image
     bind_address   = var.bind_address
     chromadb_port  = var.chromadb_port
+    enable_on_boot = var.enable_on_boot
   })
 }
 
@@ -237,6 +248,7 @@ resource "local_file" "searxng_quadlet" {
     bind_address         = var.bind_address
     searxng_port         = var.searxng_port
     searxng_settings_dir = local.searxng_settings_dir
+    enable_on_boot       = var.enable_on_boot
   })
 }
 
@@ -244,16 +256,18 @@ resource "local_file" "ntfy_quadlet" {
   filename = "${local.expanded_quadlet_dir}/odysseus-ntfy.container"
 
   content = templatefile("${path.module}/quadlet/odysseus-ntfy.container.tftpl", {
-    ntfy_image   = var.ntfy_image
-    bind_address = var.bind_address
-    ntfy_port    = var.ntfy_port
+    ntfy_image     = var.ntfy_image
+    bind_address   = var.bind_address
+    ntfy_port      = var.ntfy_port
+    enable_on_boot = var.enable_on_boot
   })
 }
 
 # Track admin password hash so we can detect a real credential change.
 resource "local_file" "admin_password_hash" {
-  filename = "${local.odysseus_dir}/.admin_password_hash"
-  content  = sha256(local.admin_password)
+  filename        = "${local.odysseus_dir}/.admin_password_hash"
+  file_permission = "0600"
+  content         = sha256(local.admin_password)
 }
 
 # When the admin password changes, drop the stored user file so the app's

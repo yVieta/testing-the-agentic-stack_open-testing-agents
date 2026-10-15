@@ -14,6 +14,15 @@ ContainerName=odysseus-app
 # pasta's gateway, so the app shares the host net and talks to them on
 # 127.0.0.1 directly.
 Network=host
+# Harden the runtime: drop all capabilities but keep exactly what the
+# entrypoint needs to chown /app/data + /app/logs and drop to PUID/PGID
+# (mirrors the SearXNG unit), and forbid privilege escalation.
+DropCapability=ALL
+AddCapability=CHOWN
+AddCapability=SETGID
+AddCapability=SETUID
+AddCapability=DAC_OVERRIDE
+NoNewPrivileges=true
 Volume=${odysseus_dir}/data:/app/data:z
 Volume=${odysseus_dir}/logs:/app/logs:z
 Volume=${odysseus_dir}/data/ssh:/app/.ssh:z
@@ -50,6 +59,8 @@ Environment=EMAIL_FROM=${email_from}
 [Service]
 Restart=always
 RestartSec=10
+%{ if enable_on_boot ~}
 
 [Install]
 WantedBy=default.target
+%{ endif ~}

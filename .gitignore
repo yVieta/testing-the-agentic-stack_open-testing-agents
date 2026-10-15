@@ -20,5 +20,8 @@ secrets/
 plan.tfplan
 crash.log
 
+# OpenTofu state-encryption passphrase (if pointed inside the repo)
+.tofu-state-passphrase
+
 # Lean4 harness build artifacts (lake build)
 .lake/

@@ -8,10 +8,14 @@ ContainerName=odysseus-chromadb
 PublishPort=${bind_address}:${chromadb_port}:8000
 Volume=odysseus-chromadb-data:/chroma/chroma
 Environment=ANONYMIZED_TELEMETRY=FALSE
+DropCapability=ALL
+NoNewPrivileges=true
 
 [Service]
 Restart=always
 RestartSec=5
+%{ if enable_on_boot ~}
 
 [Install]
 WantedBy=default.target
+%{ endif ~}

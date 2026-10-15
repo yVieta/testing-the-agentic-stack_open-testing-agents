@@ -9,10 +9,17 @@ Exec=serve
 PublishPort=${bind_address}:${ntfy_port}:80
 Volume=odysseus-ntfy-cache:/var/cache/ntfy
 Environment=NTFY_BASE_URL=http://localhost:${ntfy_port}
+# ntfy listens on :80 inside the container; keep only NET_BIND_SERVICE so it can
+# still bind the privileged port after we drop everything else.
+DropCapability=ALL
+AddCapability=NET_BIND_SERVICE
+NoNewPrivileges=true
 
 [Service]
 Restart=always
 RestartSec=5
+%{ if enable_on_boot ~}
 
 [Install]
 WantedBy=default.target
+%{ endif ~}

@@ -118,6 +118,12 @@ resource "random_password" "postgres" {
 
   length  = 32
   special = false
+
+  # Never regenerate/delete the Postgres password by accident (it is baked into
+  # the DB volume on first start; a new password would lock the DB out).
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "local_sensitive_file" "credentials_env" {

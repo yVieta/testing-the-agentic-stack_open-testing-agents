@@ -1,7 +1,7 @@
 # open-testing-agents:selfhost
 
 Video Presentataion can be found at https://codeberg.org/spifamily/open-testing-agents-abgabe
-A presetation about this project is also [in](./presentation)
+A presetation about this project is also in [./presentation](./presentation).
 
 A self-hosted, fully declarative **testing lab** you can run on a single
 machine: three AI agents — an **e2e engineer**, a **pentester** and a **test
@@ -111,11 +111,99 @@ nix develop -c just              # compile .dhall -> build/<role>/ (+ build/agen
 nix develop -c just deploy       # deploy the whole stack (root deploy/ module)
 ```
 
+## Prerequisites & portability
+
+The stack runs on any **systemd** Linux distro with **Nix** — NixOS is *not*
+required. Anything the deploy needs that OpenTofu and its provisioners cannot
+install lives in the flake; only a few host-level facts are beyond Nix:
+
+The **container runtime is flexible**: `nix develop` prefers a host
+`podman`/`podman-compose` when present and falls back to the Nix-provided ones
+otherwise, so a bare host needs no podman package:
+
+```sh
+nix develop                       # prints whether it uses host or Nix podman
+nix develop -c just start         # deploy the whole stack
+```
+
+Rootless podman needs a subuid/subgid range for your user (usually already set —
+check `grep "^$USER:" /etc/subuid /etc/subgid`). To add one:
+
+```sh
+sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$USER"
+```
+
+**Quadlet-generator caveat.** Podman converts `~/.config/containers/systemd/*.container`
+into systemd units via a *user generator*, which systemd reads only from
+`/run`,`/etc`,`/usr/local/lib`,`/usr/lib/systemd/user-generators` (there is no
+user-writable path). If your distro ships podman this is already wired. On a host
+**without** podman, register the Nix podman's generator once (needs root):
+
+```sh
+nix develop -c sh -c 'sudo install -Dm755 "$(dirname "$(dirname "$(command -v podman)")")/lib/systemd/user-generators/podman-user-generator" /usr/local/lib/systemd/user-generators/podman-user-generator"'
+systemctl --user daemon-reload
+```
+
+> **Note:** the deploy never runs `podman` directly from a script — it is only
+> invoked by OpenTofu provisioners (`podman build`/`run`, `podman-compose`) and by
+> systemd for the Quadlet units. All of it is declarative state under `deploy/`.
+
+## Security & hardening
+
+The stack is loopback-only by default, and the deploy hardens both its state and
+its containers:
+
+- **State is encrypted at rest.** `deploy/terraform.tfstate` holds generated
+  secrets (Postgres + Odysseus passwords, the model API key), so OpenTofu
+  encrypts the state *and* plan files with PBKDF2 + AES-GCM
+  (`deploy/encryption.tf`). The passphrase lives outside the repo in a `0600`
+  file that the `just` recipes generate on first use:
+
+  ```sh
+  /var/spool/aigents/.tofu-state-passphrase   # override with AIGENTS_STATE_PASSPHRASE_FILE
+  ```
+
+  **Back that file up** — without it the state cannot be decrypted. Running raw
+  `tofu -chdir=deploy …` (instead of `just`) means exporting it yourself; `tofu`
+  otherwise **fails closed** rather than reading/writing plaintext:
+
+  ```sh
+  export TF_VAR_state_passphrase="$(cat /var/spool/aigents/.tofu-state-passphrase)"
+  umask 077                       # keep the files tofu writes owner-only
+  tofu -chdir=deploy plan
+  ```
+
+- **Generated secrets resist accidental teardown.** The `random_password`
+  resources carry `prevent_destroy`, so a stray `tofu destroy` fails instead of
+  silently rotating the Postgres/Odysseus credentials. (The `local_*` files are
+  intentionally *not* guarded: the provider replaces them on every content
+  change, so a guard there would block ordinary credential updates.)
+
+- **The API refuses unsafe exposure.** `model_api_key` must be set whenever the
+  model `bind_address` is not loopback, `expose_public` requires
+  `bind_address = "0.0.0.0"`, the MCP bus host must stay on loopback, and Grafana
+  requires a non-default admin password when enabled. Secret files are written
+  `0600`, their directories `0700`.
+
+- **Containers run hardened.** The agent units (which execute LLM-generated
+  code) drop *all* Linux capabilities (`DropCapability=ALL`, re-adding only what
+  a tool declares) and set `NoNewPrivileges=true`; the Odysseus services keep
+  only the capabilities their entrypoints need, and the SUT units set
+  `NoNewPrivileges=true`.
+
+- **Nothing auto-starts or lingers.** `enable_on_boot` (default off) keeps the
+  units out of `default.target`, and `enable_linger` (default off) makes
+  `just stop` / `just shutdown` also run `loginctl disable-linger`, so no user
+  services survive logout. Set both to `true` for an unattended server.
+
 ## Declarative Root Module (`deploy/`)
 
 The `deploy/` directory is the single declarative controller for the entire
 stack. It composes every service (model, SUT, MCP bus, agents, Odysseus) as
-child modules with dependency waves falling out of OpenTofu's DAG:
+child modules with dependency waves falling out of OpenTofu's DAG.
+
+The raw commands below need the state passphrase exported (see *Security &
+hardening*); the `just` recipes do that for you.
 
 ```sh
 # Deploy everything (model, sut, mcp, agents, odysseus)

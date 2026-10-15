@@ -17,6 +17,7 @@ AddCapability=SETGID
 AddCapability=SETUID
 AddCapability=DAC_OVERRIDE
 DropCapability=ALL
+NoNewPrivileges=true
 # Bootstrap the settings file into the volume once, then hand over to the
 # upstream entrypoint. Rendered settings already carry the real secret.
 Exec=/bin/sh -c "if [ ! -s /etc/searxng/settings.yml ]; then cp /tmp/searxng-settings.yml /etc/searxng/settings.yml; fi; exec /usr/local/searxng/entrypoint.sh"
@@ -29,6 +30,8 @@ HealthStartPeriod=10s
 [Service]
 Restart=always
 RestartSec=5
+%{ if enable_on_boot ~}
 
 [Install]
 WantedBy=default.target
+%{ endif ~}

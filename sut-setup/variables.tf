@@ -70,6 +70,11 @@ variable "grafana_admin_password" {
   type      = string
   sensitive = true
   default   = "admin"
+
+  validation {
+    condition     = !var.grafana_enabled || (var.grafana_admin_password != "admin" && var.grafana_admin_password != "")
+    error_message = "Grafana is enabled but keeps a blank/default admin password. Set a non-default grafana_admin_password."
+  }
 }
 
 variable "grafana_enabled" {

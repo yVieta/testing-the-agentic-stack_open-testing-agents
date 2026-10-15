@@ -154,6 +154,7 @@ resource "local_file" "agent_quadlet" {
     run_interval    = var.run_interval
     credential_file = local.credential_file
     results_dir     = local.results_dir
+    enable_on_boot  = var.enable_on_boot
   })
 }
 

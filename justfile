@@ -12,6 +12,18 @@ set working-directory := "."
 dhall_dir := ".dhall"
 build_dir := "build"
 
+# Run OpenTofu from the single root module with a 077 umask so the state and
+# plan files it writes (they hold generated secrets) are never group or
+# world-readable.
+tofu := "umask 077; tofu -chdir=deploy"
+
+# OpenTofu state/plan are encrypted at rest (see deploy/encryption.tf). The
+# passphrase lives in a 0600 file outside the repo and is generated on first
+# use; export it as TF_VAR_state_passphrase for every tofu invocation. The path
+# can be overridden with AIGENTS_STATE_PASSPHRASE_FILE. Back this file up:
+# without it the state is unrecoverable.
+export TF_VAR_state_passphrase := `f="${AIGENTS_STATE_PASSPHRASE_FILE:-/var/spool/aigents/.tofu-state-passphrase}"; if [ ! -s "$f" ]; then mkdir -p "$(dirname "$f")"; (umask 077; head -c 48 /dev/urandom | base64 -w0 > "$f"); chmod 600 "$f"; fi; cat "$f"`
+
 # Compile every crew + its agent instructions into build/<role>/.
 default:
     @just crews
@@ -66,7 +78,7 @@ tm:
 
 # Start/converge the whole stack (model, SUT, bus, agents, Odysseus).
 start: crews
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running
+    {{ tofu }} apply -input=false -auto-approve -var service_state=running
 
 # Alias of `start` (kept for older docs).
 deploy: start
@@ -76,7 +88,7 @@ start-fast: start
 
 # Stop every service (each module stops its units).
 stop:
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=stopped
+    {{ tofu }} apply -input=false -auto-approve -var service_state=stopped
 
 # Alias of `stop`.
 down: stop
@@ -86,12 +98,12 @@ shutdown: stop
 
 # Stop then start (full clean cycle; the model boot dominates the time).
 restart:
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=stopped
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running
+    {{ tofu }} apply -input=false -auto-approve -var service_state=stopped
+    {{ tofu }} apply -input=false -auto-approve -var service_state=running
 
 # Code round-trip: reconverge bus + agents + Odysseus, keep model + SUT up.
 redeploy:
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running \
+    {{ tofu }} apply -input=false -auto-approve -var service_state=running \
         -target=module.mcp -target=module.agents -target=module.odysseus
 
 # Alias of `redeploy`.
@@ -99,12 +111,12 @@ redeploy-fast: redeploy
 
 # Set the agent run interval (seconds) and reconverge the agents.
 pace seconds:
-    tofu -chdir=deploy apply -input=false -auto-approve -var service_state=running \
+    {{ tofu }} apply -input=false -auto-approve -var service_state=running \
         -var run_interval={{ seconds }} -target=module.agents
 
 # Show the stack outputs (service URLs / state).
 status:
-    tofu -chdir=deploy output
+    {{ tofu }} output
 
 # Remove build/.
 clean:

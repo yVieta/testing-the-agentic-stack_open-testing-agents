@@ -10,6 +10,10 @@ Description=aigents testing agent ${agent_role} (crew ${role_dir})
 Image=${image}
 Pull=never
 Network=host
+# The agents execute LLM-generated code, so drop every capability and forbid
+# privilege escalation. Capabilities a tool declares are re-added explicitly.
+DropCapability=ALL
+NoNewPrivileges=true
 %{ for cap in capabilities ~}
 AddCapability=${cap}
 %{ endfor ~}
@@ -31,6 +35,8 @@ Exec=python3 /repo/worker/run_agent.py
 [Service]
 # Give the crew enough time to complete and save results (crew can take 2+ hours)
 TimeoutStopSec=14400
+%{ if enable_on_boot ~}
 
 [Install]
 WantedBy=default.target
+%{ endif ~}

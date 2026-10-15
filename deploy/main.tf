@@ -37,6 +37,7 @@ module "model" {
   spool_root              = var.spool_root
   service_state           = var.service_state
   secondary_model_enabled = var.secondary_model_enabled
+  enable_linger           = var.enable_linger
 }
 
 # --- system under test: Juice Shop behind the nginx proxy --------------------
@@ -47,6 +48,7 @@ module "sut" {
   home_dir        = var.home_dir
   service_state   = var.service_state
   grafana_enabled = var.grafana_enabled
+  enable_on_boot  = var.enable_on_boot
 }
 
 # --- MCP knowledge/control bus ------------------------------------------------
@@ -62,6 +64,8 @@ module "mcp" {
   target_url     = var.target_url
   report_mail_to = var.report_mail_to
   service_state  = var.service_state
+  enable_on_boot = var.enable_on_boot
+  enable_linger  = var.enable_linger
 }
 
 # --- testing agents -----------------------------------------------------------
@@ -85,6 +89,7 @@ module "agents" {
   build_agent_image = var.build_agent_image
   tools_overrides   = var.tools_overrides
   enable_on_boot    = var.enable_on_boot
+  enable_linger     = var.enable_linger
   service_state     = var.service_state
 }
 
@@ -98,6 +103,29 @@ module "odysseus" {
   spool_root      = var.spool_root
   report_mail_to  = var.report_mail_to
   enable_on_boot  = var.enable_on_boot
+  enable_linger   = var.enable_linger
   build_app_image = var.build_app_image
   service_state   = var.service_state
+}
+
+# --- user-manager linger ------------------------------------------------------
+# `enable_on_boot` decides whether units start at boot; linger decides whether
+# the systemd *user manager* (and any running units) survives logout. Reconcile
+# it once here instead of in each module: default off means `just stop` /
+# `just shutdown` also turn lingering off, so nothing is left running after the
+# operator logs out. Enable together with enable_on_boot for an unattended host.
+resource "null_resource" "linger" {
+  triggers = {
+    enable_linger = var.enable_linger
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      if [ "${var.enable_linger}" = "true" ]; then
+        loginctl enable-linger "$(id -un)" || true
+      else
+        loginctl disable-linger "$(id -un)" || true
+      fi
+    EOT
+  }
 }

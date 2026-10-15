@@ -33,6 +33,11 @@ variable "expose_public" {
   type        = bool
   description = "When true, opens the TCP ports in `expose_ports` with sudo/iptables so they are reachable from outside the host. Needs passwordless sudo; leave false otherwise."
   default     = false
+
+  validation {
+    condition     = !var.expose_public || var.bind_address == "0.0.0.0"
+    error_message = "expose_public = true only makes sense with bind_address = \"0.0.0.0\" (otherwise the firewall is opened for ports that still listen on loopback only)."
+  }
 }
 
 variable "expose_ports" {
@@ -193,6 +198,11 @@ variable "model_api_key" {
   description = "Bearer token required by the model API. Leave empty to disable authentication (only sane while bind_address is 127.0.0.1)."
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.model_api_key != "" || contains(["127.0.0.1", "::1", "localhost"], var.bind_address)
+    error_message = "Refusing an unauthenticated model API: set model_api_key whenever bind_address is not loopback (127.0.0.1 / ::1 / localhost)."
+  }
 }
 
 variable "hf_token" {

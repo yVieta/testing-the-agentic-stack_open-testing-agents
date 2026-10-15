@@ -17,7 +17,7 @@ resource "local_file" "juice_shop_quadlet" {
 }
 
 resource "local_file" "grafana_quadlet" {
-  count = var.grafana_enabled ? 1 : 0
+  count    = var.grafana_enabled ? 1 : 0
   filename = "${local.expanded_quadlet_dir}/grafana.container"
   content = templatefile(
     "${path.module}/quadlet/grafana.container.tftpl",
@@ -35,12 +35,13 @@ resource "local_file" "sut_pod_quadlet" {
   content = templatefile(
     "${path.module}/quadlet/sut.pod.tftpl",
     {
-      bind_address         = var.bind_address
-      nginx_http_port      = var.nginx_http_port
-      juice_shop_port      = var.juice_shop_port
-      grafana_port         = var.grafana_port
-      grafana_listen_port  = var.grafana_listen_port
-      grafana_enabled      = var.grafana_enabled
+      bind_address        = var.bind_address
+      nginx_http_port     = var.nginx_http_port
+      juice_shop_port     = var.juice_shop_port
+      grafana_port        = var.grafana_port
+      grafana_listen_port = var.grafana_listen_port
+      grafana_enabled     = var.grafana_enabled
+      enable_on_boot      = var.enable_on_boot
     }
   )
 }
