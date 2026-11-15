@@ -1,9 +1,6 @@
 # open-testing-agents-paiselfhost
 
-**three Raspberry Pis with Nix**, coordinated over
-**MQTT**. The target is a local web server reachable from all three Pis.
-
-Every tool is pulled from the **nixpkgs** package set via the **Nix package
+Most tools are pulled from the **nixpkgs** package set via the **Nix package
 manager** — you do **not** need to be on NixOS. Host systems (the MQTT
 broker, the SUT, optional GPU / model / database servers) are provisioned
 with **Terraform/OpenTofu**.
@@ -45,15 +42,15 @@ graph TD
 ```
 
 Each Raspberry Pi runs **one agent** and one MQTT worker. The workers chain
-results: e2e → pentester → test manager → final report, all over MQTT topics.
-The **64-bit hardware server** (broker, Agda validator, and local LLM host) joins the same network
+results: e2e -> pentester -> test manager -> final report, all over MQTT topics.
+The **64-bit hardware server** (broker, Agda/Lean validator, and local LLM host) joins the same network
 over MQTT, so the crew can offload formal proof verification, model inference, and databases onto machines
 with dedicated resources.
 
 ## Architecture
 
 | Topic                    | Published by   | Consumed by       | Payload                        |
-|--------------------------|----------------|-------------------|--------------------------------|
+|--------------------------|----------------|---------------------|-----------------------------------|
 | `crew/start`             | trigger (we)   | PI 1 (e2e)        | anything (kickoff)             |
 | `crew/pentester/input`   | PI 1 (e2e)     | PI 2 (pentester)  | playwright output              |
 | `crew/manager/input`     | PI 2 (sec-test)| PI 3 (manager)    | security findings              |
@@ -62,14 +59,7 @@ with dedicated resources.
 | `crew/final`             | PI 3 (manager) | monitor/dashboard | final markdown report          |
 | `crew/status/<role>`     | each worker    | monitor           | JSON lifecycle state           |
 
-- The previous phase's output is saved to `previous_output.md` in the
-  worker's working directory (`build/<role>/`) and read via the agent's
-  `FileReadTool`; the final `report.md` lives there too.
-- Broker host, `TARGET_URL`, TLS settings and broker **credentials** live in
-  `build/<role>/.env` (never committed); the roles' MQTT passwords are set on
-  the broker.
-
-## Formal Verification with Agda
+## Formal Verification with Agda eventually switching to Lean4
 
 To enforce rigorous behavior and prevent hallucination cycles during agent collaboration, **Agda** is introduced as a interactive proof assistant. 
 - **Harnessing:** Agent action boundaries, tool pre-conditions, and state transitions are modeled as formal types in Agda.
@@ -85,7 +75,7 @@ The infrastructure utilizes a single self-hosted server with the following const
 To stay within the **8GB VRAM** safety envelope while leaving room for the system OS, EMQX broker, and Agda type-checker, we deploy:
 * **Model:** `Llama-3-8B-Instruct`
 * **Quantization:** `Q4_K_M` (4-bit medium GGUF quantization)
-* **Resource Footprint:** ~4.8 GB VRAM allocation when run via `llama.cpp` or `Ollama`, leaving ~3.2 GB VRAM headroom and ample system memory for processing complex context windows without context swapping.
+* **Resource Footprint:** ~4.8 GB VRAM allocation when run via `llama.cpp` or `Ollama`, leaving ~3.2 GB VRAM headroom
 
 ## Tools from nixpkgs — no NixOS required
 
@@ -106,7 +96,9 @@ Pis and on your dev machine.
 
 - `.dhall/` — crew + agent definitions (Dhall; the single source of truth)
 - `worker/worker.py` — the MQTT worker each role runs
-- `sut-setup/` — TF that configures the host systems (services)
+- `sut-setup/` — TF that configures the host systems (SUT, broker, Grafana, nginx)
+- `model-setup/` — TF for the model + vector store node (Qwen3-Coder via llama.cpp, PostgreSQL + pgvector, Qdrant)
+- `pi-setup/` — TF for the per-Pi agent/worker services
 - `hosts/`, `modules/` — optional NixOS config for the broker host
 - `flake.nix` — the `nix develop` shell (nixpkgs as flake input, containing Agda + dependencies)
 - `Makefile` — compiles the crews (`make`)
@@ -151,6 +143,35 @@ Services bind to `0.0.0.0` by default so the Pis can reach them over the LAN;
 tune `bind_address` / `expose_public` in `sut-setup/variables.tf`. Tear down
 with `systemctl --user stop <service>` then `tofu destroy`. Details in
 `sut-setup/README.md`.
+
+## Current Model & vector store via Terraform/OpenTofu
+
+`model-setup/` provisions the model node the same way — Quadlet units, one pod,
+nothing hand-edited:
+
+- **Qwen3-Coder 30B-A3B** (`Q4_K_M` GGUF) served by **llama.cpp** on
+  `127.0.0.1:18080`, OpenAI-compatible `/v1`
+- **PostgreSQL + pgvector** on `:15432` (`documents`, `document_embeddings`,
+  `match_documents()`)
+- **Qdrant** on `:16333` (HTTP) / `:16334` (gRPC), API-key protected
+
+```sh
+cd model-setup
+tofu init && tofu apply
+systemctl --user start model-fetch.service   # downloads the ~18.6 GB GGUF
+systemctl --user start qwen-coder.service    # first start mmaps it, takes minutes
+curl http://127.0.0.1:18080/health
+```
+
+Images, layers, weights and database files all live under `/var/spool/aigents`
+(`containers/`, `model/`, `database/`). Unlike `sut-setup`, these bind to
+`127.0.0.1` by default — set `model_api_key` before switching `bind_address` to
+`0.0.0.0`, since llama-server's CORS policy allows every origin. Details in
+`model-setup/README.md`.
+
+Note that `sut-setup/` and `model-setup/` share one Podman image store
+(`/var/spool/aigents/containers/storage`); the graphroot is configured once,
+globally, because per-unit storage overrides break pod starts.
 
 ## Managing the Compute Server (GPU / models / database / Agda)
 

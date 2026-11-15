@@ -1,0 +1,28 @@
+[Unit]
+Description=Qwen3-Coder served by llama.cpp
+After=${pod_unit}
+Requires=${pod_unit}
+ConditionPathExists=${model_file_path}
+
+[Container]
+Image=${model_image}
+Pull=${image_pull_policy}
+Pod=${pod_file}
+Volume=${model_dir}:/models:Z
+Environment=LLAMA_CACHE=/models/.llama-cache
+Environment=LLAMA_ARG_HOST=${model_bind_address}
+
+Exec=${model_exec_args}
+HealthCmd=curl -fsS http://127.0.0.1:8080/health
+HealthInterval=30s
+HealthStartPeriod=20m
+HealthRetries=5
+
+[Service]
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=infinity
+TimeoutStopSec=120
+
+[Install]
+WantedBy=${pod_unit}

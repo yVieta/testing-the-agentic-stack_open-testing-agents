@@ -1,0 +1,28 @@
+[Unit]
+Description=PostgreSQL 17 + pgvector (aigents)
+After=${pod_unit}
+Requires=${pod_unit}
+
+[Container]
+Image=${postgres_image}
+Pull=${image_pull_policy}
+Pod=${pod_file}
+Volume=${postgres_data_dir}:/var/lib/postgresql/data:Z
+Volume=${initdb_dir}:/docker-entrypoint-initdb.d:ro,Z
+Environment=POSTGRES_DB=${postgres_db}
+Environment=POSTGRES_USER=${postgres_user}
+Environment=POSTGRES_PASSWORD=${postgres_password}
+
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+Environment=POSTGRES_INITDB_ARGS=--data-checksums
+HealthCmd=pg_isready -U ${postgres_user} -d ${postgres_db}
+HealthInterval=10s
+HealthStartPeriod=30s
+HealthRetries=12
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=${pod_unit}

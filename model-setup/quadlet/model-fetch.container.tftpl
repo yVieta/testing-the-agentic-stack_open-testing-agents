@@ -1,0 +1,24 @@
+[Unit]
+Description=Download the Qwen3-Coder GGUF weights into ${model_dir}
+Documentation=manually started: systemctl --user start model-fetch.service
+After=${pod_unit}
+Requires=${pod_unit}
+ConditionPathExists=!${model_file_path}
+
+[Container]
+Image=${model_image}
+Pull=${image_pull_policy}
+Volume=${model_dir}:/models:Z
+Volume=${scripts_dir}:/opt/aigents:ro
+Environment=MODEL_REPO=${model_repo}
+Environment=MODEL_FILE=${model_file}
+Environment=MODEL_DIR=/models
+Environment=MODEL_SHA256=${model_sha256}
+Environment=HF_ENDPOINT=${hf_endpoint}
+Environment=HF_TOKEN=${hf_token}
+Entrypoint=/opt/aigents/fetch-gguf.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=0

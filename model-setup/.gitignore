@@ -1,0 +1,14 @@
+# State holds the generated Postgres password and Qdrant API key in plaintext
+# (local_sensitive_file.credentials_env + random_password results). Never commit.
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+plan.tfplan
+
+# Provider plugins / module cache
+.terraform/
+.terraform.lock.hcl
+
+# Rendered from postgres/initdb/ by tofu apply, consumed by the container's
+# initdb hook. Generated, not source.
+postgres/rendered/
